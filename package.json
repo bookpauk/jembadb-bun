@@ -1,0 +1,24 @@
+{
+  "name": "jembadb",
+  "version": "1.0.0",
+  "description": "Json Embeddable Appendable Database",
+  "main": "./src/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/bookpauk/jembadb.git"
+  },
+  "keywords": [
+    "JavaScript",
+    "Json",
+    "Database"
+  ],
+  "author": "Book Pauk <bookpauk@gmail.com>",
+  "license": "CC0-1.0",
+  "bugs": {
+    "url": "https://github.com/bookpauk/jembadb/issues"
+  },
+  "homepage": "https://github.com/bookpauk/jembadb#readme"
+}
