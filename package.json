@@ -15,6 +15,9 @@
     "Json",
     "Database"
   ],
+  "engines": {
+    "node": ">=14.4.0"
+  },
   "author": "Book Pauk <bookpauk@gmail.com>",
   "license": "CC0-1.0",
   "bugs": {
