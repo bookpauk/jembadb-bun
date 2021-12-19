@@ -55,6 +55,19 @@ class JembaDb {
         this.dbPath = query.dbPath;
         await fs.mkdir(this.dbPath, { recursive: true });
 
+        //simple locking by file existence
+        this.lockFile = `${query.dbPath}/__lock`;
+        let locked = false;
+        try {
+            locked = (await fs.access(this.lockFile) === undefined);
+        } catch(e) {
+            //
+        }
+        if (locked)
+            throw new Error(`Database locked: ${query.dbPath}`);
+        await fs.writeFile(this.lockFile, '');
+
+        //table list & default settings
         this.table = new Map();
         this.tableOpenDefaults = {
             inMemory: query.inMemory,
@@ -74,6 +87,8 @@ class JembaDb {
             return;
         
         await this.closeAll();
+        await fs.unlink(this.lockFile);
+
         this.opened = false;
 
         //console.log('closed');
