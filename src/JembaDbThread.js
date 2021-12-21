@@ -105,10 +105,10 @@ class JembaDbThread {
     }
 
     async closeDb() {
-        const result = await this._action('closeDb');
+        if (this.worker)
+            await this._action('closeDb');
         this._terminate();
         //console.log('DB closed');
-        return result;
     }
 
     esc(obj) {

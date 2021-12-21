@@ -35,6 +35,8 @@ class JembaDb {
     /*
     query = {
         dbPath: String,
+        create: Boolean,
+
         //table open defaults
         inMemory: Boolean, false
         cacheSize: Number, 5
@@ -53,7 +55,11 @@ class JembaDb {
             throw new Error(`'query.dbPath' parameter is required`);
 
         this.dbPath = query.dbPath;
-        await fs.mkdir(this.dbPath, { recursive: true });
+        if (query.create) {
+            await fs.mkdir(this.dbPath, { recursive: true });
+        } else {
+            await fs.access(this.dbPath);
+        }
 
         //simple locking by file existence
         this.lockFile = `${query.dbPath}/__lock`;
