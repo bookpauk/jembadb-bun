@@ -109,7 +109,6 @@ class JembaDbThread {
             await this._action('closeDb');
         this._terminate();
         //console.log('DB closed');
-        return;
     }
 
     esc(obj) {
