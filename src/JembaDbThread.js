@@ -101,7 +101,12 @@ class JembaDbThread {
             throw new Error('Worker has been created already');
         }
 
-        return this._action('openDb', query);
+        try {
+            await this._action('openDb', query);
+        } catch(e) {
+            this._terminate();
+            throw e;
+        }
     }
 
     async closeDb() {
