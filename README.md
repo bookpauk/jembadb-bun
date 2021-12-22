@@ -1,3 +1,3 @@
 # JembaDb
 
-JembaDb - tiny Json Embeddable Appendable Database
+JembaDb - tiny Json Embedded Appending Database
