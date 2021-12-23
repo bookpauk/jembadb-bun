@@ -138,6 +138,9 @@ function inflate(buf) {
     });
 }
 
+function hasProp(obj, prop) {
+    return Object.prototype.hasOwnProperty.call(obj, prop);
+}
 
 module.exports = {
     sleep,
@@ -151,4 +154,5 @@ module.exports = {
     cloneDeep,
     deflate,
     inflate,
+    hasProp
 };

@@ -439,7 +439,7 @@ class Table {
         let ids;//iterator
         if (query.where) {
             const where = this.prepareWhere(query.where);
-            const whereFunc = new Function(`return ${where}`)();
+            const whereFunc = new Function(`'use strict'; return ${where}`)();
 
             ids = await whereFunc(this.reducer);
         } else {
@@ -484,7 +484,7 @@ class Table {
 
         let result = [];
         if (query.map) {
-            const mapFunc = new Function(`return ${query.map}`)();
+            const mapFunc = new Function(`'use strict'; return ${query.map}`)();
 
             for (const row of found) {
                 result.push(mapFunc(row));
@@ -494,13 +494,13 @@ class Table {
         }
 
         if (query.sort) {
-            const sortFunc = new Function(`return ${query.sort}`)();
+            const sortFunc = new Function(`'use strict'; return ${query.sort}`)();
             result.sort(sortFunc);
         }
 
-        if (query.hasOwnProperty('limit') || query.hasOwnProperty('offset')) {
+        if (utils.hasProp(query, 'limit') || utils.hasProp(query, 'offset')) {
             const offset = query.offset || 0;
-            const limit = (query.hasOwnProperty('limit') ? query.limit : result.length);
+            const limit = (utils.hasProp(query, 'limit') ? query.limit : result.length);
             result = result.slice(offset, offset + limit);
         }
 
@@ -540,9 +540,6 @@ class Table {
             const newRowsStr = [];
             //checks
             for (const newRow of newRows) {
-                if (newRow.hasOwnProperty('___meta'))
-                    throw new Error(`Use of field with name '___meta' is forbidden`);
-
                 if (newRow.id === undefined) {
                     newRow.id = this.autoIncrement;
                     this.autoIncrement++;
@@ -618,13 +615,13 @@ class Table {
             if (typeof(query.mod) !== 'string') {
                 throw new Error('query.mod must be a string');
             }
-            const modFunc = new Function(`return ${query.mod}`)();
+            const modFunc = new Function(`'use strict'; return ${query.mod}`)();
 
             //where
             let ids;//iterator
             if (query.where) {
                 const where = this.prepareWhere(query.where);
-                const whereFunc = new Function(`return ${where}`)();
+                const whereFunc = new Function(`'use strict'; return ${where}`)();
 
                 ids = await whereFunc(this.reducer);
             } else {
@@ -642,14 +639,14 @@ class Table {
             }
 
             if (query.sort) {
-                const sortFunc = new Function(`return ${query.sort}`)();
+                const sortFunc = new Function(`'use strict'; return ${query.sort}`)();
                 oldRows.sort(sortFunc);
             }
             let newRows = utils.cloneDeep(oldRows);
 
-            if (query.hasOwnProperty('limit') || query.hasOwnProperty('offset')) {
+            if (utils.hasProp(query, 'limit') || utils.hasProp(query, 'offset')) {
                 const offset = query.offset || 0;
-                const limit = (query.hasOwnProperty('limit') ? query.limit : newRows.length);
+                const limit = (utils.hasProp(query, 'limit') ? query.limit : newRows.length);
                 newRows = newRows.slice(offset, offset + limit);
                 oldRows = oldRows.slice(offset, offset + limit);
             }
@@ -668,9 +665,6 @@ class Table {
                 //autoIncrement correction
                 if (t === 'number' && newRow.id >= this.autoIncrement)
                     this.autoIncrement = newRow.id + 1;
-
-                if (newRow.hasOwnProperty('___meta'))
-                    throw new Error(`Use of field with name '___meta' is forbidden`);
 
                 newRowsStr.push(JSON.stringify(newRow));//because of stringify errors
             }
@@ -727,7 +721,7 @@ class Table {
             let ids;//iterator
             if (query.where) {
                 const where = this.prepareWhere(query.where);
-                const whereFunc = new Function(`return ${where}`)();
+                const whereFunc = new Function(`'use strict'; return ${where}`)();
 
                 ids = await whereFunc(this.reducer);
             } else {
@@ -747,13 +741,13 @@ class Table {
             }
 
             if (query.sort) {
-                const sortFunc = new Function(`return ${query.sort}`)();
+                const sortFunc = new Function(`'use strict'; return ${query.sort}`)();
                 oldRows.sort(sortFunc);
             }
 
-            if (query.hasOwnProperty('limit') || query.hasOwnProperty('offset')) {
+            if (utils.hasProp(query, 'limit') || utils.hasProp(query, 'offset')) {
                 const offset = query.offset || 0;
-                const limit = (query.hasOwnProperty('limit') ? query.limit : newRows.length);
+                const limit = (utils.hasProp(query, 'limit') ? query.limit : newRows.length);
                 newRows = newRows.slice(offset, offset + limit);
                 oldRows = oldRows.slice(offset, offset + limit);
             }
