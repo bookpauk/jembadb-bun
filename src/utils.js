@@ -1,3 +1,5 @@
+'use strict';
+
 const fsCB = require('fs');
 const fs = fsCB.promises;
 const zlib = require('zlib');

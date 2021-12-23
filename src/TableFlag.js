@@ -1,3 +1,5 @@
+'use strict';
+
 class TableFlag {
     constructor(checkCode) {
         this.checkCode = checkCode;

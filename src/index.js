@@ -1,3 +1,5 @@
+'use strict';
+
 const JembaDb = require('./JembaDb');
 const JembaDbThread = require('./JembaDbThread');
 
