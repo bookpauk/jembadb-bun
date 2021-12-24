@@ -427,6 +427,7 @@ class Table {
         map: '(r) => ({id1: r.id, ...})',
         where: `@@index('field1', 10, 20)`,
         sort: '(a, b) => a.id - b.id',
+        group: {byField: 'fieldName' || Array, byExpr: '(r) => groupingValue', countField: 'fieldName'},
         limit: 10,
         offset: 10,
     }
@@ -437,6 +438,7 @@ class Table {
         this.checkErrors();
 
         let ids;//iterator
+        //where condition
         if (query.where) {
             const where = this.prepareWhere(query.where);
             const whereFunc = new Function(`'use strict'; return ${where}`)();
@@ -446,33 +448,65 @@ class Table {
             ids = this.rowsInterface.getAllIds();
         }
 
-        let found = [];
+        //grouping
+        let inGroup = () => false;
+        const groupMap = new Map();
+        const doCount = query.group && query.group.countField;
 
-        let distinct = () => true;
-        if (query.distinct) {
-            const distFields = (Array.isArray(query.distinct) ? query.distinct : [query.distinct]);
-            const dist = new Map();
-            distinct = (row) => {
-                let uniq = '';
-                for (const field of distFields) {
-                    const value = row[field];
-                    uniq += `${(value === undefined ? '___' : '')}${field}:${value}`;
+        if (query.distinct || query.group) {
+            if (query.distinct && query.group)
+                throw new Error(`One of query.distinct or query.qroup params expected, but not both`);
+
+            let groupByField = null;
+            let groupByExpr = null;
+            if (query.distinct)
+                groupByField = (Array.isArray(query.distinct) ? query.distinct : [query.distinct]);
+            
+            if (query.group) {
+                if (query.group.byField && query.group.byExpr)
+                    throw new Error(`One of query.qroup.byField or query.qroup.byExpr params expected, but not both`);
+                if (query.group.byField) {
+                    groupByField = (Array.isArray(query.group.byField) ? query.group.byField : [query.group.byField]);
+                } else if (query.group.byExpr) {
+                    groupByExpr = new Function(`'use strict'; return ${query.group.byExpr}`)();
+                }
+            }
+
+            //returns (count - 1) group size
+            inGroup = (row) => {
+                let groupingValue = '';
+                if (groupByField) {
+                    for (const field of groupByField) {
+                        const value = JSON.stringify(row[field]);
+                        groupingValue += value.length + value;
+                    }
+                } else if (groupByExpr) {
+                    groupingValue = groupByExpr(row);
                 }
 
-                if (dist.has(uniq))
-                    return false;
-                dist.set(uniq, true);
-                return true;
+                if (groupMap.has(groupingValue)) {
+                    if (doCount) {
+                        const count = groupMap.get(groupingValue);
+                        groupMap.set(groupingValue, count + 1);
+                        return count;
+                    }
+                    return 1;
+                }
+
+                groupMap.set(groupingValue, 1);
+                return 0;
             };
         }
 
-        if (!query.where && !query.distinct && query.count) {//some optimization
+        //selection
+        let found = [];
+        if (!query.where && !query.distinct && !query.group && query.count) {//minor optimization
             found = [{count: this.rowsInterface.getAllIdsSize()}];
         } else {//full running
             for (const id of ids) {
                 const row = await this.rowsInterface.getRow(id);
 
-                if (row && distinct(row)) {
+                if (row && !inGroup(row)) {
                     found.push(row);
                 }
             }
@@ -482,6 +516,16 @@ class Table {
             }
         }
 
+        found = utils.cloneDeep(found);//for safu
+
+        //grouping count field
+        if (doCount) {
+            for (const row of found) {
+                row[query.group.countField] = inGroup(row);
+            }
+        }
+
+        //mapping
         let result = [];
         if (query.map) {
             const mapFunc = new Function(`'use strict'; return ${query.map}`)();
@@ -493,18 +537,20 @@ class Table {
             result = found;
         }
 
+        //sorting
         if (query.sort) {
             const sortFunc = new Function(`'use strict'; return ${query.sort}`)();
             result.sort(sortFunc);
         }
 
+        //limits&offset
         if (utils.hasProp(query, 'limit') || utils.hasProp(query, 'offset')) {
             const offset = query.offset || 0;
             const limit = (utils.hasProp(query, 'limit') ? query.limit : result.length);
             result = result.slice(offset, offset + limit);
         }
 
-        return utils.cloneDeep(result);
+        return result;
     }
 
     /*

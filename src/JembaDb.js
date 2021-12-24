@@ -438,6 +438,7 @@ class JembaDb {
         map: '(r) => ({id1: r.id, ...})',
         where: `@@index('field1', 10, 20)`,
         sort: '(a, b) => a.id - b.id',
+        group: {byField: 'fieldName' || Array, byExpr: '(r) => groupingValue', countField: 'fieldName'},
         limit: 10,
         offset: 10,
     }
