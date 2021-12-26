@@ -433,14 +433,15 @@ class JembaDb {
     /*
     query = {
     (!) table: 'tableName',
-        distinct: 'fieldName' || Array,
         count: Boolean,
-        map: '(r) => ({id1: r.id, ...})',
         where: `@@index('field1', 10, 20)`,
-        sort: '(a, b) => a.id - b.id',
+        distinct: 'fieldName' || Array,
         group: {byField: 'fieldName' || Array, byExpr: '(r) => groupingValue', countField: 'fieldName'},
+        map: '(r) => ({id1: r.id, ...})',
+        sort: '(a, b) => a.id - b.id',
         limit: 10,
         offset: 10,
+        joinById: {table: 'tableName', on: 'fieldNameToJoinOn', out: 'fieldNameToPutJoinResult', map: '(r) => r.name'} || Array,
     }
     result = Array
     */
@@ -450,15 +451,60 @@ class JembaDb {
         if (!query.table)
             throw new Error(`'query.table' parameter is required`);
 
+        const checkTable = async(table) => {
+            if (await this.tableExists({table})) {
+                throw new Error(`Table '${table}' has not been opened yet`);
+            } else {
+                throw new Error(`Table '${table}' does not exist`);
+            }
+        };
+
         const table = this.table.get(query.table);
         if (table) {
-            return await table.select(query);
-        } else {
-            if (await this.tableExists({table: query.table})) {
-                throw new Error(`Table '${query.table}' has not been opened yet`);
-            } else {
-                throw new Error(`Table '${query.table}' does not exist`);
+            //select
+            const resultRows = await table.select(query);
+
+            //joinById
+            if (query.joinById) {
+                const joinList = (Array.isArray(query.joinById) ? query.joinById : [query.joinById]);
+
+                for (const join of joinList) {
+                    if (!join.table)
+                        throw new Error(`'joinById.table' parameter is required`);
+                    if (!join.on)
+                        throw new Error(`'joinById.on' parameter is required`);
+
+
+                    const joinTable = this.table.get(join.table);
+                    if (joinTable) {
+                        const on = join.on;
+                        const ids = resultRows.map((r) => r[on])
+                        
+                        const joinRows = await joinTable.select({where: `@@id(${this.esc(ids)})`});
+
+                        let mapFunc = null;
+                        if (join.map) {
+                            mapFunc = new Function(`'use strict'; return ${join.map}`)();
+                        }
+
+                        const idMap = new Map();
+                        for (const row of joinRows) {
+                            idMap.set(row.id, (mapFunc ? mapFunc(row) : row));
+                        }
+
+                        const out = (join.out ? join.out : `table_${join.table}`);
+                        for (const row of resultRows) {
+                            row[out] = idMap.get(row[on]);
+                        }
+                    } else {
+                        await checkTable(joinTable);
+                    }
+                }
             }
+
+            return resultRows;
+        } else {
+            await checkTable(query.table);
         }
     }
 

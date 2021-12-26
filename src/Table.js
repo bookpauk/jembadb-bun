@@ -422,12 +422,12 @@ class Table {
 
     /*
     query = {
-        distinct: 'fieldName' || Array,
         count: Boolean,
-        map: '(r) => ({id1: r.id, ...})',
         where: `@@index('field1', 10, 20)`,
-        sort: '(a, b) => a.id - b.id',
+        distinct: 'fieldName' || Array,
         group: {byField: 'fieldName' || Array, byExpr: '(r) => groupingValue', countField: 'fieldName'},
+        map: '(r) => ({id1: r.id, ...})',
+        sort: '(a, b) => a.id - b.id',
         limit: 10,
         offset: 10,
     }
