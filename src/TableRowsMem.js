@@ -1,3 +1,5 @@
+'use strict';
+
 class TableRowsMem {
     constructor() {
         this.rows = new Map();

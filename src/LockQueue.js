@@ -1,3 +1,5 @@
+'use strict';
+
 class LockQueue {
     constructor(queueSize) {
         this.queueSize = queueSize;

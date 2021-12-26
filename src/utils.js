@@ -1,3 +1,5 @@
+'use strict';
+
 const fsCB = require('fs');
 const fs = fsCB.promises;
 const zlib = require('zlib');
@@ -136,6 +138,9 @@ function inflate(buf) {
     });
 }
 
+function hasProp(obj, prop) {
+    return Object.prototype.hasOwnProperty.call(obj, prop);
+}
 
 module.exports = {
     sleep,
@@ -149,4 +154,5 @@ module.exports = {
     cloneDeep,
     deflate,
     inflate,
+    hasProp
 };

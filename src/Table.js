@@ -1,3 +1,5 @@
+'use strict';
+
 const fs = require('fs').promises;
 const utils = require('./utils');
 
@@ -420,10 +422,11 @@ class Table {
 
     /*
     query = {
-        distinct: 'fieldName' || Array,
         count: Boolean,
-        map: '(r) => ({id1: r.id, ...})',
         where: `@@index('field1', 10, 20)`,
+        distinct: 'fieldName' || Array,
+        group: {byField: 'fieldName' || Array, byExpr: '(r) => groupingValue', countField: 'fieldName'},
+        map: '(r) => ({id1: r.id, ...})',
         sort: '(a, b) => a.id - b.id',
         limit: 10,
         offset: 10,
@@ -435,42 +438,75 @@ class Table {
         this.checkErrors();
 
         let ids;//iterator
+        //where condition
         if (query.where) {
             const where = this.prepareWhere(query.where);
-            const whereFunc = new Function(`return ${where}`)();
+            const whereFunc = new Function(`'use strict'; return ${where}`)();
 
             ids = await whereFunc(this.reducer);
         } else {
             ids = this.rowsInterface.getAllIds();
         }
 
-        let found = [];
+        //grouping
+        let inGroup = () => false;
+        const groupMap = new Map();
+        const doCount = query.group && query.group.countField;
 
-        let distinct = () => true;
-        if (query.distinct) {
-            const distFields = (Array.isArray(query.distinct) ? query.distinct : [query.distinct]);
-            const dist = new Map();
-            distinct = (row) => {
-                let uniq = '';
-                for (const field of distFields) {
-                    const value = row[field];
-                    uniq += `${(value === undefined ? '___' : '')}${field}:${value}`;
+        if (query.distinct || query.group) {
+            if (query.distinct && query.group)
+                throw new Error(`One of query.distinct or query.qroup params expected, but not both`);
+
+            let groupByField = null;
+            let groupByExpr = null;
+            if (query.distinct)
+                groupByField = (Array.isArray(query.distinct) ? query.distinct : [query.distinct]);
+            
+            if (query.group) {
+                if (query.group.byField && query.group.byExpr)
+                    throw new Error(`One of query.qroup.byField or query.qroup.byExpr params expected, but not both`);
+                if (query.group.byField) {
+                    groupByField = (Array.isArray(query.group.byField) ? query.group.byField : [query.group.byField]);
+                } else if (query.group.byExpr) {
+                    groupByExpr = new Function(`'use strict'; return ${query.group.byExpr}`)();
+                }
+            }
+
+            //returns (count - 1) group size
+            inGroup = (row) => {
+                let groupingValue = '';
+                if (groupByField) {
+                    for (const field of groupByField) {
+                        const value = JSON.stringify(row[field]);
+                        groupingValue += value.length + value;
+                    }
+                } else if (groupByExpr) {
+                    groupingValue = groupByExpr(row);
                 }
 
-                if (dist.has(uniq))
-                    return false;
-                dist.set(uniq, true);
-                return true;
+                if (groupMap.has(groupingValue)) {
+                    if (doCount) {
+                        const count = groupMap.get(groupingValue);
+                        groupMap.set(groupingValue, count + 1);
+                        return count;
+                    }
+                    return 1;
+                }
+
+                groupMap.set(groupingValue, 1);
+                return 0;
             };
         }
 
-        if (!query.where && !query.distinct && query.count) {//some optimization
+        //selection
+        let found = [];
+        if (!query.where && !query.distinct && !query.group && query.count) {//minor optimization
             found = [{count: this.rowsInterface.getAllIdsSize()}];
         } else {//full running
             for (const id of ids) {
                 const row = await this.rowsInterface.getRow(id);
 
-                if (row && distinct(row)) {
+                if (row && !inGroup(row)) {
                     found.push(row);
                 }
             }
@@ -480,9 +516,19 @@ class Table {
             }
         }
 
+        found = utils.cloneDeep(found);//for safu
+
+        //grouping count field
+        if (doCount) {
+            for (const row of found) {
+                row[query.group.countField] = inGroup(row);
+            }
+        }
+
+        //mapping
         let result = [];
         if (query.map) {
-            const mapFunc = new Function(`return ${query.map}`)();
+            const mapFunc = new Function(`'use strict'; return ${query.map}`)();
 
             for (const row of found) {
                 result.push(mapFunc(row));
@@ -491,18 +537,20 @@ class Table {
             result = found;
         }
 
+        //sorting
         if (query.sort) {
-            const sortFunc = new Function(`return ${query.sort}`)();
+            const sortFunc = new Function(`'use strict'; return ${query.sort}`)();
             result.sort(sortFunc);
         }
 
-        if (query.hasOwnProperty('limit') || query.hasOwnProperty('offset')) {
+        //limits&offset
+        if (utils.hasProp(query, 'limit') || utils.hasProp(query, 'offset')) {
             const offset = query.offset || 0;
-            const limit = (query.hasOwnProperty('limit') ? query.limit : result.length);
+            const limit = (utils.hasProp(query, 'limit') ? query.limit : result.length);
             result = result.slice(offset, offset + limit);
         }
 
-        return utils.cloneDeep(result);
+        return result;
     }
 
     /*
@@ -538,9 +586,6 @@ class Table {
             const newRowsStr = [];
             //checks
             for (const newRow of newRows) {
-                if (newRow.hasOwnProperty('___meta'))
-                    throw new Error(`Use of field with name '___meta' is forbidden`);
-
                 if (newRow.id === undefined) {
                     newRow.id = this.autoIncrement;
                     this.autoIncrement++;
@@ -616,13 +661,13 @@ class Table {
             if (typeof(query.mod) !== 'string') {
                 throw new Error('query.mod must be a string');
             }
-            const modFunc = new Function(`return ${query.mod}`)();
+            const modFunc = new Function(`'use strict'; return ${query.mod}`)();
 
             //where
             let ids;//iterator
             if (query.where) {
                 const where = this.prepareWhere(query.where);
-                const whereFunc = new Function(`return ${where}`)();
+                const whereFunc = new Function(`'use strict'; return ${where}`)();
 
                 ids = await whereFunc(this.reducer);
             } else {
@@ -640,14 +685,14 @@ class Table {
             }
 
             if (query.sort) {
-                const sortFunc = new Function(`return ${query.sort}`)();
+                const sortFunc = new Function(`'use strict'; return ${query.sort}`)();
                 oldRows.sort(sortFunc);
             }
             let newRows = utils.cloneDeep(oldRows);
 
-            if (query.hasOwnProperty('limit') || query.hasOwnProperty('offset')) {
+            if (utils.hasProp(query, 'limit') || utils.hasProp(query, 'offset')) {
                 const offset = query.offset || 0;
-                const limit = (query.hasOwnProperty('limit') ? query.limit : newRows.length);
+                const limit = (utils.hasProp(query, 'limit') ? query.limit : newRows.length);
                 newRows = newRows.slice(offset, offset + limit);
                 oldRows = oldRows.slice(offset, offset + limit);
             }
@@ -666,9 +711,6 @@ class Table {
                 //autoIncrement correction
                 if (t === 'number' && newRow.id >= this.autoIncrement)
                     this.autoIncrement = newRow.id + 1;
-
-                if (newRow.hasOwnProperty('___meta'))
-                    throw new Error(`Use of field with name '___meta' is forbidden`);
 
                 newRowsStr.push(JSON.stringify(newRow));//because of stringify errors
             }
@@ -725,7 +767,7 @@ class Table {
             let ids;//iterator
             if (query.where) {
                 const where = this.prepareWhere(query.where);
-                const whereFunc = new Function(`return ${where}`)();
+                const whereFunc = new Function(`'use strict'; return ${where}`)();
 
                 ids = await whereFunc(this.reducer);
             } else {
@@ -745,13 +787,13 @@ class Table {
             }
 
             if (query.sort) {
-                const sortFunc = new Function(`return ${query.sort}`)();
+                const sortFunc = new Function(`'use strict'; return ${query.sort}`)();
                 oldRows.sort(sortFunc);
             }
 
-            if (query.hasOwnProperty('limit') || query.hasOwnProperty('offset')) {
+            if (utils.hasProp(query, 'limit') || utils.hasProp(query, 'offset')) {
                 const offset = query.offset || 0;
-                const limit = (query.hasOwnProperty('limit') ? query.limit : newRows.length);
+                const limit = (utils.hasProp(query, 'limit') ? query.limit : newRows.length);
                 newRows = newRows.slice(offset, offset + limit);
                 oldRows = oldRows.slice(offset, offset + limit);
             }

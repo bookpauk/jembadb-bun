@@ -1,3 +1,5 @@
+'use strict';
+
 class TableHash {
     //opts.type = 'string' || 'number' || 'number_as_string'
     constructor(opts = {}) {
