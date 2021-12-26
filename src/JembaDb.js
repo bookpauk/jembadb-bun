@@ -478,8 +478,8 @@ class JembaDb {
                     const joinTable = this.table.get(join.table);
                     if (joinTable) {
                         const on = join.on;
-                        const ids = resultRows.map((r) => r[on])
-                        
+                        const ids = resultRows.map((r) => r[on]);
+
                         const joinRows = await joinTable.select({where: `@@id(${this.esc(ids)})`});
 
                         let mapFunc = null;
