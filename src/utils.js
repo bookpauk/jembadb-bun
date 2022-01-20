@@ -83,27 +83,6 @@ async function pathExists(path) {
     }
 }
 
-async function appendFileToFile(nameFrom, nameTo) {
-    return new Promise((resolve, reject) => {
-        const readStream = fsCB.createReadStream(nameFrom);
-        readStream.on('error', (err) => {
-            reject(err);
-        });
-
-        const writeStream = fsCB.createWriteStream(nameTo, {flags: 'a'});
-
-        writeStream.on('error', (err) => {
-            reject(err);
-        });
-
-        writeStream.on('close', () => {
-            resolve();
-        });
-
-        readStream.pipe(writeStream);
-    });
-}
-
 function esc(obj) {
     return JSON.stringify(obj).replace(/@/g, '\\x40');
 }
@@ -148,7 +127,6 @@ module.exports = {
     unionSet,
     intersectSet,
     pathExists,
-    appendFileToFile,
     esc,
     paramToArray,
     cloneDeep,

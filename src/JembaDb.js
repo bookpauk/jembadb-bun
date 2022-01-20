@@ -36,10 +36,12 @@ class JembaDb {
 
     /*
     query = {
-        dbPath: String,
-        create: Boolean,
+    (!) dbPath: String, required
+        create: Boolean, false,
+        ignoreLock: Boolean, false,
 
         //table open defaults
+        //huge: {blockSize: 1000000, cacheSize: 1, fastMode: false},
         inMemory: Boolean, false
         cacheSize: Number, 5
         compressed: Number, {0..9}, 0
@@ -65,15 +67,12 @@ class JembaDb {
 
         //simple locking by file existence
         this.lockFile = `${query.dbPath}/__lock`;
-        let locked = false;
-        try {
-            locked = (await fs.access(this.lockFile) === undefined);
-        } catch(e) {
-            //
+        if (await utils.pathExists(this.lockFile)) {
+            if (!query.ignoreLock)
+                throw new Error(`Database locked: ${query.dbPath}`);
+        } else {
+            await fs.writeFile(this.lockFile, '');
         }
-        if (locked)
-            throw new Error(`Database locked: ${query.dbPath}`);
-        await fs.writeFile(this.lockFile, '');
 
         //table list & default settings
         this.table = new Map();
@@ -95,7 +94,10 @@ class JembaDb {
             return;
         
         await this.closeAll();
-        await fs.unlink(this.lockFile);
+
+        if (await utils.pathExists(this.lockFile)) {
+            await fs.unlink(this.lockFile);
+        }
 
         this.opened = false;
 
@@ -111,6 +113,7 @@ class JembaDb {
     query = {
         table: 'tableName',
         quietIfExists: Boolean,
+
         inMemory: Boolean, false
         cacheSize: Number, 5
         compressed: Number, {0..9}, 0
@@ -222,6 +225,7 @@ class JembaDb {
     /*
     query = {
     (!) table: 'tableName',
+
         inMemory: Boolean, false
         cacheSize: Number, 5
         compressed: Number, {0..9}, 0
