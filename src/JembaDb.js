@@ -98,6 +98,7 @@ class JembaDb {
 
         //release file lock
         await utils.releaseFileLock(this.dbPath, this.lockTimer);
+        this.lockTimer = null;
 
         this.opened = false;        
 
