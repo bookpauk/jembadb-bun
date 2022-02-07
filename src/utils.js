@@ -168,7 +168,7 @@ async function getFileLock(lockPath, softLock, ignoreLock) {
     } else {//soft lock
         await fs.writeFile(softLockFile, '');
 
-        timer = setTimeout(async() => {
+        timer = setInterval(async() => {
             await deleteFile(softLockCheckFile);
         }, 200);
     }
@@ -182,7 +182,7 @@ async function releaseFileLock(lockPath, timer) {
     const softLockCheckFile = `${lockPath}/__softlockcheck`;
 
     if (timer)
-        clearTimeout(timer);
+        clearInterval(timer);
 
     await deleteFile(softLockCheckFile);
     await deleteFile(softLockFile);
