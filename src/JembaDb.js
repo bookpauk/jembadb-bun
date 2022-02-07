@@ -70,7 +70,15 @@ class JembaDb {
         }
 
         //file lock
-        this.lockTimer = await utils.getFileLock(this.dbPath, query.softLock, query.ignoreLock);
+        try {
+            this.lockTimer = await utils.getFileLock(this.dbPath, query.softLock, query.ignoreLock);
+        } catch (e) {
+            if (e.message.indexOf('Path locked') === 0) {
+                throw new Error(`Database locked: ${this.dbPath}`);
+            } else {
+                throw e;
+            }
+        }
 
         //table list & default settings
         this.table = new Map();
