@@ -4,8 +4,8 @@ const { Worker } = require('worker_threads');
 const utils = require('./utils');
 const JembaDbChild = require('./JembaDbChild');
 /* API methods:
-openDb
-closeDb
+lock
+unlock
 
 create
 drop
@@ -16,7 +16,7 @@ close
 closeAll
 
 tableExists
-getInfo
+getDbInfo
 getDbSize
 
 select
@@ -36,7 +36,7 @@ class JembaDbThread {
         const apiMethods = [
             //lock, unlock,
             'create', 'drop', 'open', 'openAll', 'close', 'closeAll',
-            'tableExists', 'getDbInfo', 'getDbSize', 'select', 'insert', 'update', 'delete', 'dumpTables'
+            'tableExists', 'getDbInfo', 'getDbSize', 'select', 'insert', 'update', 'delete'
         ];
 
         for (const action of apiMethods) {
