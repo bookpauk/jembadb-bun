@@ -83,27 +83,6 @@ async function pathExists(path) {
     }
 }
 
-async function appendFileToFile(nameFrom, nameTo) {
-    return new Promise((resolve, reject) => {
-        const readStream = fsCB.createReadStream(nameFrom);
-        readStream.on('error', (err) => {
-            reject(err);
-        });
-
-        const writeStream = fsCB.createWriteStream(nameTo, {flags: 'a'});
-
-        writeStream.on('error', (err) => {
-            reject(err);
-        });
-
-        writeStream.on('close', () => {
-            resolve();
-        });
-
-        readStream.pipe(writeStream);
-    });
-}
-
 function esc(obj) {
     return JSON.stringify(obj).replace(/@/g, '\\x40');
 }
@@ -142,17 +121,87 @@ function hasProp(obj, prop) {
     return Object.prototype.hasOwnProperty.call(obj, prop);
 }
 
+async function deleteFile(file) {
+    if (await pathExists(file)) {
+        await fs.unlink(file);
+    }
+}
+
+// locking by file existence
+// returns timer
+async function getFileLock(lockPath, softLock, ignoreLock) {
+    const lockFile = `${lockPath}/__lock`;
+    const softLockFile = `${lockPath}/__softlock`;
+    const softLockCheckFile = `${lockPath}/__softlockcheck`;
+
+    //check locks
+    //  hard lock
+    if (!ignoreLock && await pathExists(lockFile)) {
+        throw new Error(`Path locked: ${lockPath}`);
+    }
+
+    //  soft lock
+    if (!ignoreLock && await pathExists(softLockFile)) {
+        await fs.writeFile(softLockCheckFile, '');
+        const stat = await fs.stat(softLockCheckFile);
+        await sleep(1000);
+        let locked = true;
+        if (await pathExists(softLockCheckFile)) {//not deleted
+            const stat2 = await fs.stat(softLockCheckFile);
+            if (stat.ctimeMs === stat2.ctimeMs) {//created by us
+                locked = false;
+            }
+        }
+
+        if (locked)
+            throw new Error(`Path locked: ${lockPath}`);
+    }
+
+    await deleteFile(softLockCheckFile);
+    await deleteFile(softLockFile);
+    await deleteFile(lockFile);
+
+    //get locks
+    let timer;
+    if (!softLock) {//hard lock
+        await fs.writeFile(lockFile, '');
+    } else {//soft lock
+        await fs.writeFile(softLockFile, '');
+
+        timer = setTimeout(async() => {
+            await deleteFile(softLockCheckFile);
+        }, 200);
+    }
+
+    return timer;
+}
+
+async function releaseFileLock(lockPath, timer) {
+    const lockFile = `${lockPath}/__lock`;
+    const softLockFile = `${lockPath}/__softlock`;
+    const softLockCheckFile = `${lockPath}/__softlockcheck`;
+
+    if (timer)
+        clearTimeout(timer);
+
+    await deleteFile(softLockCheckFile);
+    await deleteFile(softLockFile);
+    await deleteFile(lockFile);
+}
+
 module.exports = {
     sleep,
     sleepWithStop,
     unionSet,
     intersectSet,
     pathExists,
-    appendFileToFile,
     esc,
     paramToArray,
     cloneDeep,
     deflate,
     inflate,
-    hasProp
+    hasProp,
+    deleteFile,
+    getFileLock,
+    releaseFileLock,
 };

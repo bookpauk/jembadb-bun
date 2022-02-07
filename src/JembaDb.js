@@ -36,20 +36,26 @@ class JembaDb {
 
     /*
     query = {
-        dbPath: String,
-        create: Boolean,
+    (!) dbPath: String, required
+        create: Boolean, false,
+        softLock: Boolean, false
+        ignoreLock: Boolean, false,
+
+        //huge: {blockSize: 1000000, cacheSize: 1, fastMode: false},
 
         //table open defaults
-        inMemory: Boolean, false
-        cacheSize: Number, 5
-        compressed: Number, {0..9}, 0
-        recreate: Boolean, false,
-        autoRepair: Boolean, false,
-        forceFileClosing: Boolean, false,
-        lazyOpen: Boolean, false,
+        tableDefaults: {
+            inMemory: Boolean, false
+            cacheSize: Number, 5
+            compressed: Number, {0..9}, 0
+            recreate: Boolean, false,
+            autoRepair: Boolean, false,
+            forceFileClosing: Boolean, false,
+            lazyOpen: Boolean, false,
+        },
     }
     */
-    async openDb(query = {}) {
+    async lock(query = {}) {
         if (this.opened)
             throw new Error(`Database ${this.dbPath} has already been opened`);
 
@@ -63,54 +69,51 @@ class JembaDb {
             await fs.access(this.dbPath);
         }
 
-        //simple locking by file existence
-        this.lockFile = `${query.dbPath}/__lock`;
-        let locked = false;
+        //file lock
         try {
-            locked = (await fs.access(this.lockFile) === undefined);
-        } catch(e) {
-            //
+            this.lockTimer = await utils.getFileLock(this.dbPath, query.softLock, query.ignoreLock);
+        } catch (e) {
+            if (e.message.indexOf('Path locked') === 0) {
+                throw new Error(`Database locked: ${this.dbPath}`);
+            } else {
+                throw e;
+            }
         }
-        if (locked)
-            throw new Error(`Database locked: ${query.dbPath}`);
-        await fs.writeFile(this.lockFile, '');
 
         //table list & default settings
         this.table = new Map();
-        this.tableOpenDefaults = {
-            inMemory: query.inMemory,
-            cacheSize: query.cacheSize,
-            compressed: query.compressed,
-            recreate: query.recreate,
-            autoRepair: query.autoRepair,
-            forceFileClosing: query.forceFileClosing,
-            lazyOpen: query.lazyOpen,
-        };
+        this.tableOpenDefaults = {};
+
+        if (query.tableDefaults)
+            this.tableOpenDefaults = utils.cloneDeep(query.tableDefaults);
 
         this.opened = true;
     }
 
-    async closeDb() {
+    async unlock() {
         if (!this.opened)
             return;
-        
-        await this.closeAll();
-        await fs.unlink(this.lockFile);
 
-        this.opened = false;
+        await this.closeAll();
+
+        //release file lock
+        await utils.releaseFileLock(this.dbPath, this.lockTimer);
+
+        this.opened = false;        
 
         //console.log('closed');
     }
 
     checkOpened() {
         if (!this.opened)
-            throw new Error('Database closed');
+            throw new Error(`Database closed. Use 'db.lock' to lock & open database.`);
     }
 
     /*
     query = {
         table: 'tableName',
         quietIfExists: Boolean,
+
         inMemory: Boolean, false
         cacheSize: Number, 5
         compressed: Number, {0..9}, 0
@@ -222,6 +225,7 @@ class JembaDb {
     /*
     query = {
     (!) table: 'tableName',
+
         inMemory: Boolean, false
         cacheSize: Number, 5
         compressed: Number, {0..9}, 0
