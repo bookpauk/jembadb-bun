@@ -34,6 +34,7 @@ class JembaDbThread {
         this.requestId = 0;
 
         const apiMethods = [
+            //lock, unlock,
             'create', 'drop', 'open', 'openAll', 'close', 'closeAll',
             'tableExists', 'getDbInfo', 'getDbSize', 'select', 'insert', 'update', 'delete', 'dumpTables'
         ];
@@ -96,7 +97,7 @@ class JembaDbThread {
         });
     }
 
-    async openDb(query = {}) {
+    async lock(query = {}) {
         if (!this.worker) {
             this._runWoker();
         } else {
@@ -104,16 +105,16 @@ class JembaDbThread {
         }
 
         try {
-            await this._action('openDb', query);
+            await this._action('lock', query);
         } catch(e) {
             this._terminate();
             throw e;
         }
     }
 
-    async closeDb() {
+    async unlock() {
         if (this.worker)
-            await this._action('closeDb');
+            await this._action('unlock');
         this._terminate();
         //console.log('DB closed');
     }
