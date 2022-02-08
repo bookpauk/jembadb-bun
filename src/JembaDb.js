@@ -71,7 +71,7 @@ class JembaDb {
 
         //file lock
         try {
-            this.lockTimer = await utils.getFileLock(this.dbPath, query.softLock, query.ignoreLock);
+            this.fileWatcher = await utils.getFileLock(this.dbPath, query.softLock, query.ignoreLock);
         } catch (e) {
             if (e.message.indexOf('Path locked') === 0) {
                 throw new Error(`Database locked: ${this.dbPath}`);
@@ -97,8 +97,8 @@ class JembaDb {
         await this.closeAll();
 
         //release file lock
-        await utils.releaseFileLock(this.dbPath, this.lockTimer);
-        this.lockTimer = null;
+        await utils.releaseFileLock(this.dbPath, this.fileWatcher);
+        this.fileWatcher = null;
 
         this.opened = false;        
 

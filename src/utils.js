@@ -128,11 +128,12 @@ async function deleteFile(file) {
 }
 
 // locking by file existence
-// returns timer
+// returns watcher
 async function getFileLock(lockPath, softLock, ignoreLock) {
     const lockFile = `${lockPath}/__lock`;
     const softLockFile = `${lockPath}/__softlock`;
-    const softLockCheckFile = `${lockPath}/__softlockcheck`;
+    const softLockCheckName = '__softlockcheck';
+    const softLockCheckFile = `${lockPath}/${softLockCheckName}`;
 
     //check locks
     //  hard lock
@@ -142,13 +143,19 @@ async function getFileLock(lockPath, softLock, ignoreLock) {
 
     //  soft lock
     if (!ignoreLock && await pathExists(softLockFile)) {
-        await fs.writeFile(softLockCheckFile, '');
-        const stat = await fs.stat(softLockCheckFile);
-        await sleep(1000);
         let locked = true;
+
+        await fs.writeFile(softLockCheckFile, '');
+
+        let stat = null;
+        try { stat = await fs.stat(softLockCheckFile); } catch(e) {} // eslint-disable-line no-empty
+
+        await sleep(1000);//if main process is busy, give it time to delete softLockCheckFile
+
         if (await pathExists(softLockCheckFile)) {//not deleted
-            const stat2 = await fs.stat(softLockCheckFile);
-            if (stat.ctimeMs === stat2.ctimeMs) {//created by us
+            let stat2 = null;
+            try { stat2 = await fs.stat(softLockCheckFile); } catch(e) {} // eslint-disable-line no-empty
+            if (stat && stat2 && stat.ctimeMs === stat2.ctimeMs) {//created by us
                 locked = false;
             }
         }
@@ -161,28 +168,34 @@ async function getFileLock(lockPath, softLock, ignoreLock) {
     await deleteFile(softLockFile);
     await deleteFile(lockFile);
 
-    //get locks
-    let timer;
+    //obtain locks
+    let fileWatcher;
     if (!softLock) {//hard lock
         await fs.writeFile(lockFile, '');
     } else {//soft lock
         await fs.writeFile(softLockFile, '');
 
-        timer = setInterval(async() => {
-            await deleteFile(softLockCheckFile);
-        }, 200);
+        fileWatcher = fsCB.watch(lockPath, async(eventType, filename) => {
+            if (filename == softLockCheckName) {
+                try {
+                    await deleteFile(softLockCheckFile);
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+        });
     }
 
-    return timer;
+    return fileWatcher;
 }
 
-async function releaseFileLock(lockPath, timer) {
+async function releaseFileLock(lockPath, fileWatcher) {
     const lockFile = `${lockPath}/__lock`;
     const softLockFile = `${lockPath}/__softlock`;
     const softLockCheckFile = `${lockPath}/__softlockcheck`;
 
-    if (timer)
-        clearInterval(timer);
+    if (fileWatcher)
+        fileWatcher.close();
 
     await deleteFile(softLockCheckFile);
     await deleteFile(softLockFile);
