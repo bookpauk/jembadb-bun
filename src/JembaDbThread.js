@@ -9,6 +9,7 @@ unlock
 
 create
 drop
+truncate
 
 open
 openAll
@@ -35,7 +36,7 @@ class JembaDbThread {
 
         const apiMethods = [
             //lock, unlock,
-            'create', 'drop', 'open', 'openAll', 'close', 'closeAll',
+            'create', 'drop', 'truncate', 'open', 'openAll', 'close', 'closeAll',
             'tableExists', 'getDbInfo', 'getDbSize', 'select', 'insert', 'update', 'delete'
         ];
 

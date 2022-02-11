@@ -226,6 +226,60 @@ class JembaDb {
     /*
     query = {
     (!) table: 'tableName',
+    }
+    result = {}
+    */
+    async truncate(query = {}) {
+        this.checkOpened();
+
+        if (!query.table)
+            throw new Error(`'query.table' parameter is required`);
+
+        const checkTable = async(table) => {
+            if (await this.tableExists({table})) {
+                throw new Error(`Table '${table}' has not been opened yet`);
+            } else {
+                throw new Error(`Table '${table}' does not exist`);
+            }
+        };
+
+        const table = this.table.get(query.table);
+        if (table) {
+            //truncate
+            const oldQuery = table.openingQuery;
+
+            const tablePath = oldQuery.tablePath;
+            const tempTablePath = `${tablePath}___temporary_truncating`;
+            await fs.rmdir(tempTablePath, { recursive: true });
+
+            oldQuery.tablePath = tempTablePath;
+            const meta = await table.getMeta();
+
+            const newTable = new Table();
+
+            await newTable.open(oldQuery);            
+            await newTable.create(meta);
+
+            await this.drop(query);
+
+            if (oldQuery.inMemory) {
+                this.table.set(query.table, newTable);
+            } else {
+                await newTable.close();
+                await fs.rename(tempTablePath, tablePath);
+            }
+
+            await this.open(query);
+
+            return {};
+        } else {
+            await checkTable(query.table);
+        }
+    }
+
+    /*
+    query = {
+    (!) table: 'tableName',
 
         inMemory: Boolean, false
         cacheSize: Number, 5
@@ -248,14 +302,13 @@ class JembaDb {
             if (!table) {
                 table = new Table();
             }
+            this.table.set(query.table, table);
 
             if (!table.opened) {
                 const opts = Object.assign({}, this.tableOpenDefaults, query);
                 opts.tablePath = `${this.dbPath}/${query.table}`;                
                 await table.open(opts);
             }
-
-            this.table.set(query.table, table);
         } else {
             throw new Error(`Table '${query.table}' does not exist`);
         }
@@ -268,8 +321,10 @@ class JembaDb {
 
         for (const file of files) {
             if (file.isDirectory()) {
-                if (file.name.indexOf('___temporary_recreating') >= 0)
+                if (file.name.indexOf('___temporary_recreating') >= 0 ||
+                    file.name.indexOf('___temporary_truncating') >= 0)
                     continue;
+                
                 result.push(file.name);
             }
         }

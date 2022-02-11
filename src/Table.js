@@ -24,6 +24,7 @@ class Table {
         this.closed = false;
         this.deltaStep = 0;
         this.changes = [];
+        this.openingQuery = {};
 
         //table options defaults
         this.inMemory = false;
@@ -181,7 +182,8 @@ class Table {
     */
     async _open(query = {}) {
         if (this.opening)
-            return;
+            throw new Error('Table open in progress');
+
         this.opening = true;
         await this.openingLock.get();
         //console.log(query);
@@ -190,6 +192,8 @@ class Table {
                 throw new Error('Table has already been opened');
             if (this.closed)
                 throw new Error('Table instance has been destroyed. Please create a new one.');
+
+            this.openingQuery = query;//for external usage
 
             this.inMemory = !!query.inMemory;
 
@@ -262,7 +266,7 @@ class Table {
             else
                 this.fileError = errMes;
         } finally {
-            this.openingLock.ret();
+            this.openingLock.free();
             this.opening = false;
         }
     }
@@ -309,7 +313,7 @@ class Table {
     result = {}
     */
     async create(query) {
-        await this.openingLock.get(false);
+        await this.openingLock.wait();
         this.checkErrors();
 
         await this.lock.get();
@@ -356,7 +360,7 @@ class Table {
     result = {}
     */
     async drop(query) {
-        await this.openingLock.get(false);
+        await this.openingLock.wait();
         this.checkErrors();
 
         await this.lock.get();
@@ -434,7 +438,7 @@ class Table {
     result = Array
     */
     async select(query = {}) {
-        await this.openingLock.get(false);
+        await this.openingLock.wait();
         this.checkErrors();
 
         let ids;//iterator
@@ -564,7 +568,7 @@ class Table {
     }
     */
     async insert(query = {}) {
-        await this.openingLock.get(false);
+        await this.openingLock.wait();
         this.checkErrors();
 
         await this.lock.get();
@@ -653,7 +657,7 @@ class Table {
     }
     */
     async update(query = {}) {
-        await this.openingLock.get(false);
+        await this.openingLock.wait();
         this.checkErrors();
 
         await this.lock.get();
@@ -758,7 +762,7 @@ class Table {
     }
     */
     async delete(query = {}) {
-        await this.openingLock.get(false);
+        await this.openingLock.wait();
         this.checkErrors();
 
         await this.lock.get();
