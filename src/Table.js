@@ -24,7 +24,7 @@ class Table {
         this.closed = false;
         this.deltaStep = 0;
         this.changes = [];
-        this.openingQuery = {};
+        this._openingQuery = {};
 
         //table options defaults
         this.inMemory = false;
@@ -34,6 +34,11 @@ class Table {
         this.recreate = false;
         this.autoRepair = false;
         this.forceFileClosing = false;
+    }
+
+    //for external usage
+    get openingQuery() {
+        return this._openingQuery;
     }
 
     checkErrors() {
@@ -193,7 +198,7 @@ class Table {
             if (this.closed)
                 throw new Error('Table instance has been destroyed. Please create a new one.');
 
-            this.openingQuery = query;//for external usage
+            this._openingQuery = query;
 
             this.inMemory = !!query.inMemory;
 
