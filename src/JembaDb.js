@@ -161,26 +161,28 @@ class JembaDb {
         const table = (query.table ? query.table : query.in);
         await this._tableLock(table).get();
         try {
+            query = utils.cloneDeep(query);
             let tableInstance;
             if (query.table) {
-                if (await this.tableExists({table: query.table})) {
-                    if (!query.quietIfExists)
-                        throw new Error(`Table '${query.table}' already exists`);
-
-                    tableInstance = this.table.get(query.table);
-                } else {
-                    tableInstance = new Table();
-                    this.table.set(query.table, tableInstance);
-
-                    await this.open(query);
+                if (await this.tableExists({table: query.table}) && !query.quietIfExists) {
+                    throw new Error(`Table '${query.table}' already exists`);
                 }
             } else {
                 if (await this.tableExists({table: query.in})) {
-                    tableInstance = this.table.get(query.in);
+                    query.table = query.in;
                 } else {
                     throw new Error(`Table '${query.in}' does not exist`);
                 }            
             }
+
+            tableInstance = this.table.get(query.table);
+
+            if (!tableInstance) {
+                tableInstance = new Table();
+                this.table.set(query.table, tableInstance);
+            }
+
+            await this.open(query);
 
             if (query.flag || query.hash || query.index) {
                 await tableInstance.create({
