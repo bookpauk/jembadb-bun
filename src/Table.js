@@ -43,7 +43,7 @@ class Table {
         return this._openingQuery;
     }
 
-    checkErrors() {
+    _checkErrors() {
         if (this.fileError)
             throw new Error(this.fileError);
 
@@ -54,7 +54,7 @@ class Table {
             throw new Error('Table has not been opened yet');
     }
 
-    async waitForSaveChanges() {
+    async _waitForSaveChanges() {
         if (this.changes.length > maxChangesLength) {
             let i = this.changes.length - maxChangesLength;
             while (i > 0 && this.changes.length > maxChangesLength) {
@@ -64,7 +64,7 @@ class Table {
         }
     }
 
-    async recreateTable() {
+    async _recreateTable() {
         const tempTablePath = `${this.tablePath}___temporary_recreating`;
         await fs.rmdir(tempTablePath, { recursive: true });
         await fs.mkdir(tempTablePath, { recursive: true });
@@ -170,6 +170,7 @@ class Table {
         await tableRowsFileDest.destroy();        
 
         await fs.writeFile(`${tempTablePath}/state`, '1');
+        await fs.writeFile(`${tempTablePath}/ver`, this.version);
 
         await fs.rmdir(this.tablePath, { recursive: true });
         await fs.rename(tempTablePath, this.tablePath);
@@ -253,7 +254,7 @@ class Table {
                 }
 
                 if (this.recreate) {
-                    await this.recreateTable();
+                    await this._recreateTable();
                     state = '1';
                 }
 
@@ -275,7 +276,7 @@ class Table {
                 } catch(e) {
                     if (this.autoRepair) {
                         console.error(e.message);
-                        await this.recreateTable();
+                        await this._recreateTable();
                     } else {
                         throw e;
                     }
@@ -342,7 +343,7 @@ class Table {
     */
     async create(query) {
         await this.openingLock.wait();
-        this.checkErrors();
+        this._checkErrors();
 
         await this.lock.get();
         try {
@@ -374,7 +375,7 @@ class Table {
 
             return {};
         } finally {
-            this.saveChanges();//no await
+            this._saveChanges();//no await
             this.lock.ret();
         }
     }
@@ -389,7 +390,7 @@ class Table {
     */
     async drop(query) {
         await this.openingLock.wait();
-        this.checkErrors();
+        this._checkErrors();
 
         await this.lock.get();
         try {
@@ -421,7 +422,7 @@ class Table {
 
             return {};
         } finally {
-            this.saveChanges();//no await
+            this._saveChanges();//no await
             this.lock.ret();
         }
     }
@@ -435,7 +436,7 @@ class Table {
     }
     */
     async getMeta() {
-        this.checkErrors();
+        this._checkErrors();
 
         return {
             inMemory: this.inMemory,
@@ -445,7 +446,7 @@ class Table {
         };
     }
 
-    prepareWhere(where) {
+    _prepareWhere(where) {
         if (typeof(where) !== 'string')
             throw new Error('query.where must be a string');
 
@@ -467,12 +468,12 @@ class Table {
     */
     async select(query = {}) {
         await this.openingLock.wait();
-        this.checkErrors();
+        this._checkErrors();
 
         let ids;//iterator
         //where condition
         if (query.where) {
-            const where = this.prepareWhere(query.where);
+            const where = this._prepareWhere(query.where);
             const whereFunc = new Function(`'use strict'; return ${where}`)();
 
             ids = await whereFunc(this.reducer);
@@ -597,7 +598,7 @@ class Table {
     */
     async insert(query = {}) {
         await this.openingLock.wait();
-        this.checkErrors();
+        this._checkErrors();
 
         await this.lock.get();
         try {
@@ -664,10 +665,10 @@ class Table {
                 throw e;
             }
 
-            await this.waitForSaveChanges();
+            await this._waitForSaveChanges();
             return result;
         } finally {
-            this.saveChanges();//no await
+            this._saveChanges();//no await
             this.lock.ret();
         }
     }
@@ -686,7 +687,7 @@ class Table {
     */
     async update(query = {}) {
         await this.openingLock.wait();
-        this.checkErrors();
+        this._checkErrors();
 
         await this.lock.get();
         try {
@@ -698,7 +699,7 @@ class Table {
             //where
             let ids;//iterator
             if (query.where) {
-                const where = this.prepareWhere(query.where);
+                const where = this._prepareWhere(query.where);
                 const whereFunc = new Function(`'use strict'; return ${where}`)();
 
                 ids = await whereFunc(this.reducer);
@@ -770,10 +771,10 @@ class Table {
                 throw e;
             }
 
-            await this.waitForSaveChanges();
+            await this._waitForSaveChanges();
             return result;
         } finally {
-            this.saveChanges();//no await
+            this._saveChanges();//no await
             this.lock.ret();
         }
     }
@@ -791,14 +792,14 @@ class Table {
     */
     async delete(query = {}) {
         await this.openingLock.wait();
-        this.checkErrors();
+        this._checkErrors();
 
         await this.lock.get();
         try {
             //where
             let ids;//iterator
             if (query.where) {
-                const where = this.prepareWhere(query.where);
+                const where = this._prepareWhere(query.where);
                 const whereFunc = new Function(`'use strict'; return ${where}`)();
 
                 ids = await whereFunc(this.reducer);
@@ -851,19 +852,19 @@ class Table {
                 throw e;
             }
 
-            await this.waitForSaveChanges();
+            await this._waitForSaveChanges();
             return result;
         } finally {
-            this.saveChanges();//no await
+            this._saveChanges();//no await
             this.lock.ret();
         }
     }
 
-    async saveState(state) {
+    async _saveState(state) {
         await fs.writeFile(`${this.tablePath}/state`, state);
     }
 
-    async saveChanges() {
+    async _saveChanges() {
         this.needSaveChanges = true;
         if (this.savingChanges)
             return;
@@ -874,7 +875,7 @@ class Table {
         }
 
         try {
-            this.checkErrors();
+            this._checkErrors();
         } catch(e) {
             return;
         }
@@ -886,7 +887,7 @@ class Table {
             while (this.needSaveChanges) {
                 this.needSaveChanges = false;
 
-                await this.saveState('0');
+                await this._saveState('0');
                 while (this.changes.length) {
 
                     const len = this.changes.length;
@@ -906,7 +907,7 @@ class Table {
 
                     this.changes = this.changes.slice(i);
                 }
-                await this.saveState('1');
+                await this._saveState('1');
 
                 if (this.forceFileClosing) {
                     await this.tableRowsFile.closeAllFiles();

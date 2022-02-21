@@ -7,8 +7,8 @@ const LockQueue = require('./LockQueue');
 const utils = require('./utils');
 
 /* API methods:
-openDb
-closeDb
+lock
+unlock
 
 create
 drop
