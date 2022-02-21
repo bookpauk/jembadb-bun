@@ -162,7 +162,6 @@ class JembaDb {
         await this._tableLock(table).get();
         try {
             query = utils.cloneDeep(query);
-            let tableInstance;
             if (query.table) {
                 if (await this.tableExists({table: query.table}) && !query.quietIfExists) {
                     throw new Error(`Table '${query.table}' already exists`);
@@ -175,16 +174,12 @@ class JembaDb {
                 }            
             }
 
-            tableInstance = this.table.get(query.table);
-
-            if (!tableInstance) {
-                tableInstance = new Table();
-                this.table.set(query.table, tableInstance);
-            }
-
+            query.create = true;
             await this.open(query);
 
             if (query.flag || query.hash || query.index) {
+                const tableInstance = this.table.get(query.table);
+
                 await tableInstance.create({
                     quietIfExists: query.quietIfExists,
                     flag: query.flag,
@@ -318,6 +313,7 @@ class JembaDb {
     /*
     query = {
     (!) table: 'tableName',
+        create: Boolean, false,
 
         inMemory: Boolean, false
         cacheSize: Number, 5
@@ -334,13 +330,13 @@ class JembaDb {
         if (!query.table)
             throw new Error(`'query.table' parameter is required`);
 
-        if (await this.tableExists({table: query.table})) {
+        if (await this.tableExists({table: query.table}) || query.create) {
             let tableInstance = this.table.get(query.table);
 
             if (!tableInstance) {
                 tableInstance = new Table();
+                this.table.set(query.table, tableInstance);
             }
-            this.table.set(query.table, tableInstance);
 
             if (!tableInstance.opened) {
                 const opts = Object.assign({}, this.tableOpenDefaults, query);
