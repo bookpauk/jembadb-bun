@@ -12,6 +12,8 @@ const maxChangesLength = 10;
 
 class Table {
     constructor() {
+        this.version = 'common';
+
         this.rowsInterface = new TableRowsMem();
 
         this.autoIncrement = 0;
@@ -183,6 +185,7 @@ class Table {
         autoRepair: Boolean, false,
         forceFileClosing: Boolean, false,
         lazyOpen: Boolean, false,
+        verCompatMode: Boolean, false,
     }
     */
     async _open(query = {}) {
@@ -215,23 +218,38 @@ class Table {
                 this.autoRepair = query.autoRepair || false;
                 this.forceFileClosing = query.forceFileClosing || false;
 
-                await fs.mkdir(this.tablePath, { recursive: true });
+                let create = true;
+                if (await utils.pathExists(this.tablePath)) {
+                    create = false;
+                } else {
+                    await fs.mkdir(this.tablePath, { recursive: true });
+                }
 
-                this.tableRowsFile = new TableRowsFile(query.tablePath, this.cacheSize, this.compressed);
-                this.rowsInterface = this.tableRowsFile;
-
-                this.reducer = new TableReducer(this.inMemory, this.tablePath, this.compressed, this.rowsInterface);
-
+                //check table version
                 const statePath = `${this.tablePath}/state`;
+                const verPath = `${this.tablePath}/ver`;
+                if (create) {
+                    await fs.writeFile(verPath, this.version);
+                    await fs.writeFile(statePath, '1');
+                } else {
+                    let ver = null;
+                    if (await utils.pathExists(verPath)) {
+                        ver = await fs.readFile(verPath, 'utf8');
+                        if (ver !== this.version)
+                            throw new Error(`Wrong table version '${ver}', expected '${this.version}'`);
+                    } else {
+                        if (query.verCompatMode) {
+                            await fs.writeFile(verPath, this.version);
+                        } else {
+                            throw new Error(`Table version file not found`);
+                        }
+                    }
+                }
+
+                //check table state
                 let state = null;
                 if (await utils.pathExists(statePath)) {
                     state = await fs.readFile(statePath, 'utf8');
-                }
-
-                if (state === null) {//check if other files exists
-                    const files = await fs.readdir(this.tablePath);
-                    if (files.length)
-                        state = '0';
                 }
 
                 if (this.recreate) {
@@ -239,26 +257,31 @@ class Table {
                     state = '1';
                 }
 
-                if (state !== null) {
-                    try {
-                        if (state === '1') {
-                            // load tableRowsFile & reducer
-                            this.autoIncrement = await this.tableRowsFile.load();
-                            await this.reducer._load();
-                        } else {
-                            throw new Error('Table corrupted')
-                        }
-                    } catch(e) {
-                        if (this.autoRepair) {
-                            console.error(e.message);
-                            await this.recreateTable();
-                        } else {
-                            throw e;
-                        }
+                //table rows & reducer
+                this.tableRowsFile = new TableRowsFile(query.tablePath, this.cacheSize, this.compressed);
+                this.rowsInterface = this.tableRowsFile;
+
+                this.reducer = new TableReducer(this.inMemory, this.tablePath, this.compressed, this.rowsInterface);
+
+                //load
+                try {
+                    if (state === '1') {
                         // load tableRowsFile & reducer
                         this.autoIncrement = await this.tableRowsFile.load();
                         await this.reducer._load();
+                    } else {
+                        throw new Error('Table corrupted')
                     }
+                } catch(e) {
+                    if (this.autoRepair) {
+                        console.error(e.message);
+                        await this.recreateTable();
+                    } else {
+                        throw e;
+                    }
+                    // load tableRowsFile & reducer
+                    this.autoIncrement = await this.tableRowsFile.load();
+                    await this.reducer._load();
                 }
             }
 
