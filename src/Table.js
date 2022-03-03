@@ -12,7 +12,7 @@ const maxChangesLength = 10;
 
 class Table {
     constructor() {
-        this.version = 'basic';
+        this.type = 'basic';
 
         this.rowsInterface = new TableRowsMem();
 
@@ -26,21 +26,14 @@ class Table {
         this.closed = false;
         this.deltaStep = 0;
         this.changes = [];
-        this._openingQuery = {};
 
         //table options defaults
         this.inMemory = false;
-        this.compressed = 0;
         this.cacheSize = 5;
         this.compressed = 0;
         this.recreate = false;
         this.autoRepair = false;
         this.forceFileClosing = false;
-    }
-
-    //for external usage
-    get openingQuery() {
-        return this._openingQuery;
     }
 
     _checkErrors() {
@@ -64,7 +57,7 @@ class Table {
         }
     }
 
-    async _cloneTable(cloneSelf = false, srcTablePath, destTablePath) {
+    async _cloneTable(srcTablePath, destTablePath, cloneSelf = false, cloneMeta = false) {
         if (this.inMemory)
             throw new Error('_cloneTable error: inMemory source table');
 
@@ -88,7 +81,8 @@ class Table {
             console.error(e);
         }
         try {
-            await reducerDest._load(true, `${srcTablePath}/meta.0`);
+            if (cloneMeta)
+                await reducerDest._load(true, `${srcTablePath}/meta.0`);
         } catch (e) {
             console.error(e);
         }
@@ -178,13 +172,13 @@ class Table {
         await tableRowsFileDest.destroy();        
 
         await fs.writeFile(`${destTablePath}/state`, '1');
-        await fs.writeFile(`${destTablePath}/ver`, this.version);
+        await fs.writeFile(`${destTablePath}/type`, this.type);
     }
 
     async _recreateTable() {
         const tempTablePath = `${this.tablePath}___temporary_recreating`;
 
-        await this._cloneTable(false, this.tablePath, tempTablePath);
+        await this._cloneTable(this.tablePath, tempTablePath, false, true);
 
         await fs.rmdir(this.tablePath, { recursive: true });
         await fs.rename(tempTablePath, this.tablePath);
@@ -216,8 +210,6 @@ class Table {
             if (this.closed)
                 throw new Error('Table instance has been destroyed. Please create a new one.');
 
-            this._openingQuery = query;
-
             this.inMemory = !!query.inMemory;
 
             if (this.inMemory) {
@@ -242,19 +234,19 @@ class Table {
 
                 //check table version
                 const statePath = `${this.tablePath}/state`;
-                const verPath = `${this.tablePath}/ver`;
+                const typePath = `${this.tablePath}/type`;
                 if (create) {
-                    await fs.writeFile(verPath, this.version);
+                    await fs.writeFile(typePath, this.type);
                     await fs.writeFile(statePath, '1');
                 } else {
                     let ver = null;
                     if (await utils.pathExists(verPath)) {
                         ver = await fs.readFile(verPath, 'utf8');
-                        if (ver !== this.version)
-                            throw new Error(`Wrong table version '${ver}', expected '${this.version}'`);
+                        if (ver !== this.type)
+                            throw new Error(`Wrong table version '${ver}', expected '${this.type}'`);
                     } else {
                         if (query.verCompatMode) {
-                            await fs.writeFile(verPath, this.version);
+                            await fs.writeFile(verPath, this.type);
                         } else {
                             throw new Error(`Table version file not found`);
                         }
@@ -462,7 +454,7 @@ class Table {
         this._checkErrors();
 
         return {
-            version: this.version,
+            type: this.type,
             inMemory: this.inMemory,
             flag: this.reducer._listFlag(),
             hash: this.reducer._listHash(),
@@ -895,6 +887,39 @@ class Table {
         await this.close();
 
         return {};
+    }
+
+    /*
+    query = {
+    (!) toTablePath: String,
+        filter: '(r) => true' || 'nodata',
+        cloneMeta: Boolean,
+    }
+    result = {}
+    */
+    async clone(query = {}) {
+        if (!this.inMemory) {
+            throw new Error(`inMemory table can't be cloned`);
+        }
+
+        if (!query.toTablePath || typeof(query.toTablePath) !== 'string')
+            throw new Error(`'query.toTablePath' parameter is required`);
+
+        await this.openingLock.wait();
+        this._checkErrors();
+
+        await this.lock.get();
+        try {
+            while (this.savingChanges) {
+                await utils.sleep(1);
+            }
+
+            await this._cloneTable(this.tablePath, query.toTablePath, true, query.cloneMeta);
+
+            return {};
+        } finally {
+            this.lock.ret();
+        }
     }
 
     async _saveState(state) {

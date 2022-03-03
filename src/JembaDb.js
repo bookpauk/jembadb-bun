@@ -12,6 +12,8 @@ unlock
 
 create
 drop
+truncate
+clone
 
 open
 openAll
@@ -280,7 +282,7 @@ class JembaDb {
             const tableInstance = this.table.get(query.table);
             if (tableInstance) {
                 //truncate
-                const oldQuery = tableInstance.openingQuery;
+                /*const oldQuery = tableInstance.openingQuery;
 
                 const tablePath = oldQuery.tablePath;
                 const tempTablePath = `${tablePath}___temporary_truncating`;
@@ -303,7 +305,7 @@ class JembaDb {
                     await fs.rename(tempTablePath, tablePath);
                 }
 
-                await this.open(query);
+                await this.open(query);*/
 
                 return {};
             } else {
@@ -311,6 +313,67 @@ class JembaDb {
             }
         } finally {
             this._tableLock(table).ret();
+        }
+    }
+
+
+    /*
+    query = {
+    (!) table: 'tableName',
+    (!) toTable: String,
+        filter: '(r) => true' || 'nodata',
+        cloneMeta: Boolean,
+    }
+    result = {}
+    */
+    async clone(query = {}) {
+        this._checkOpened();
+
+        if (!query.table)
+            throw new Error(`'query.table' parameter is required`);
+        if (!query.toTable)
+            throw new Error(`'query.toTable' parameter is required`);
+
+        const tableInstance = this.table.get(query.table);
+
+        if (tableInstance) {
+            if (!await this.tableExists({table: query.toTable})) {
+                throw new Error(`Table '${query.toTable}' already exists`);
+            }
+
+            /*
+            query = utils.cloneDeep(query);
+            query.toTablePath = `${this.dbPath}/${query.toTable}`;
+
+            if (tableInstance.inMemory) {
+                const meta = await tableInstance.getMeta();
+                const newQuery = {inMemory: true};
+
+                const newTableInstance = new Table();
+
+                await newTableInstance.open(oldQuery);
+                await newTableInstance.create(meta);
+
+                await this._drop(query);
+
+                if (oldQuery.inMemory) {
+                    this.table.set(query.table, newTableInstance);
+                } else {
+                    await newTableInstance.close();
+                    await fs.rename(tempTablePath, tablePath);
+                }
+
+                await this.open(query);
+
+            } else {
+                await tableInstance.clone(query);
+                await this.open({table: query.toTable});
+            }
+            */
+
+            return {};
+        } else {
+            await this._checkTable(query.table);
         }
     }
 
@@ -343,7 +406,7 @@ class JembaDb {
                 this.table.set(query.table, tableInstance);
 
                 const opts = Object.assign({}, this.tableOpenDefaults, query);
-                opts.tablePath = `${this.dbPath}/${query.table}`;                
+                opts.tablePath = `${this.dbPath}/${query.table}`;
                 await tableInstance.open(opts);
             }
         } else {
