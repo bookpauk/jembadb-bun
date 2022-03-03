@@ -64,15 +64,23 @@ class Table {
         }
     }
 
-    async _recreateTable() {
-        const tempTablePath = `${this.tablePath}___temporary_recreating`;
-        await fs.rmdir(tempTablePath, { recursive: true });
-        await fs.mkdir(tempTablePath, { recursive: true });
+    async _cloneTable(cloneSelf = false, srcTablePath, destTablePath) {
+        if (this.inMemory)
+            throw new Error('_cloneTable error: inMemory source table');
 
-        const tableRowsFileSrc = new TableRowsFile(this.tablePath, this.cacheSize);
+        await fs.rmdir(destTablePath, { recursive: true });
+        await fs.mkdir(destTablePath, { recursive: true });
 
-        const tableRowsFileDest = new TableRowsFile(tempTablePath, this.cacheSize, this.compressed);
-        const reducerDest = new TableReducer(false, tempTablePath, this.compressed, tableRowsFileDest);
+        let tableRowsFileSrc;
+        if (cloneSelf) {
+            srcTablePath = this.tablePath;
+            tableRowsFileSrc = this.tableRowsFile;
+        } else {
+            tableRowsFileSrc = new TableRowsFile(srcTablePath, this.cacheSize);
+        }
+
+        const tableRowsFileDest = new TableRowsFile(destTablePath, this.cacheSize, this.compressed);
+        const reducerDest = new TableReducer(false, destTablePath, this.compressed, tableRowsFileDest);
 
         try {
             await tableRowsFileSrc.loadCorrupted();
@@ -80,7 +88,7 @@ class Table {
             console.error(e);
         }
         try {
-            await reducerDest._load(true, `${this.tablePath}/meta.0`);
+            await reducerDest._load(true, `${srcTablePath}/meta.0`);
         } catch (e) {
             console.error(e);
         }
@@ -169,8 +177,14 @@ class Table {
         await reducerDest._destroy();
         await tableRowsFileDest.destroy();        
 
-        await fs.writeFile(`${tempTablePath}/state`, '1');
-        await fs.writeFile(`${tempTablePath}/ver`, this.version);
+        await fs.writeFile(`${destTablePath}/state`, '1');
+        await fs.writeFile(`${destTablePath}/ver`, this.version);
+    }
+
+    async _recreateTable() {
+        const tempTablePath = `${this.tablePath}___temporary_recreating`;
+
+        await this._cloneTable(false, this.tablePath, tempTablePath);
 
         await fs.rmdir(this.tablePath, { recursive: true });
         await fs.rename(tempTablePath, this.tablePath);
@@ -437,6 +451,7 @@ class Table {
 
     /*
     result = {
+        version: String,
         inMemory: Boolean,
         flag:  Array, [{name: 'flag1', check: '(r) => r.id > 10'}, ...]
         hash:  Array, [{field: 'field1', type: 'string', depth: 11, allowUndef: false}, ...]
@@ -447,6 +462,7 @@ class Table {
         this._checkErrors();
 
         return {
+            version: this.version,
             inMemory: this.inMemory,
             flag: this.reducer._listFlag(),
             hash: this.reducer._listHash(),
