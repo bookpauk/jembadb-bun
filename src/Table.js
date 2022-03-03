@@ -909,7 +909,7 @@ class Table {
                 await utils.sleep(1);
             }
 
-            await this._cloneTable(this.tablePath, query.toTablePath, true, query.cloneMeta);
+            await this._cloneTable(this.tablePath, query.toTablePath, true, query.cloneMeta, query.filter);
 
             return {};
         } finally {
