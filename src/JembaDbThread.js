@@ -25,6 +25,8 @@ insert
 update
 delete
 
+markCorrupted
+
 esc
 */
 
@@ -37,7 +39,8 @@ class JembaDbThread {
         const apiMethods = [
             //lock, unlock,
             'create', 'drop', 'truncate', 'open', 'openAll', 'close', 'closeAll',
-            'tableExists', 'getDbInfo', 'getDbSize', 'select', 'insert', 'update', 'delete'
+            'tableExists', 'getDbInfo', 'getDbSize', 'select', 'insert', 'update', 'delete',
+            'markCorrupted'
         ];
 
         for (const action of apiMethods) {

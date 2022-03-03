@@ -27,6 +27,8 @@ insert
 update
 delete
 
+markCorrupted
+
 esc
 */
 
@@ -336,12 +338,10 @@ class JembaDb {
         if (await this.tableExists({table: query.table}) || query.create) {
             let tableInstance = this.table.get(query.table);
 
-            if (!tableInstance) {
+            if (!tableInstance || !tableInstance.opened) {
                 tableInstance = new Table();
                 this.table.set(query.table, tableInstance);
-            }
 
-            if (!tableInstance.opened) {
                 const opts = Object.assign({}, this.tableOpenDefaults, query);
                 opts.tablePath = `${this.dbPath}/${query.table}`;                
                 await tableInstance.open(opts);
@@ -670,6 +670,28 @@ class JembaDb {
         const tableInstance = this.table.get(query.table);
         if (tableInstance) {
             return await tableInstance.delete(query);
+        } else {
+            await this._checkTable(query.table);
+        }
+    }
+
+    /*
+    query = {
+        message: String,
+    }
+    result = {}
+    */
+    async markCorrupted(query = {}) {
+        this._checkOpened();
+
+        if (!query.table)
+            throw new Error(`'query.table' parameter is required`);
+
+        const tableInstance = this.table.get(query.table);
+        if (tableInstance) {
+            await tableInstance.markCorrupted(query);
+            await this.close(query);
+            return {};
         } else {
             await this._checkTable(query.table);
         }

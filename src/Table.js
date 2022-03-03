@@ -12,7 +12,7 @@ const maxChangesLength = 10;
 
 class Table {
     constructor() {
-        this.version = 'common';
+        this.version = 'basic';
 
         this.rowsInterface = new TableRowsMem();
 
@@ -318,6 +318,14 @@ class Table {
         if (!this.inMemory) {
             while (this.savingChanges) {
                 await utils.sleep(10);
+            }
+        }
+
+        if (this.fileError) {
+            try {
+                await this._saveState('0');
+            } catch(e) {
+                //
             }
         }
 
@@ -858,6 +866,19 @@ class Table {
             this._saveChanges();//no await
             this.lock.ret();
         }
+    }
+
+    /*
+    query = {
+        message: String,
+    }
+    result = {}
+    */
+    async markCorrupted(query = {}) {
+        this.fileError = query.message || 'Table corrupted';
+        await this.close();
+
+        return {};
     }
 
     async _saveState(state) {
