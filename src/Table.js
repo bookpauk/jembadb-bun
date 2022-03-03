@@ -187,7 +187,6 @@ class Table {
     /*
     query: {
         tablePath: String,
-        inMemory: Boolean,
         cacheSize: Number,
         compressed: Number, 0..9
         recreate: Boolean, false,
@@ -209,8 +208,6 @@ class Table {
                 throw new Error('Table has already been opened');
             if (this.closed)
                 throw new Error('Table instance has been destroyed. Please create a new one.');
-
-            this.inMemory = !!query.inMemory;
 
             if (this.inMemory) {
                 this.reducer = new TableReducer(this.inMemory, '', 0, this.rowsInterface);
@@ -239,14 +236,14 @@ class Table {
                     await fs.writeFile(typePath, this.type);
                     await fs.writeFile(statePath, '1');
                 } else {
-                    let ver = null;
-                    if (await utils.pathExists(verPath)) {
-                        ver = await fs.readFile(verPath, 'utf8');
-                        if (ver !== this.type)
-                            throw new Error(`Wrong table version '${ver}', expected '${this.type}'`);
+                    let type = null;
+                    if (await utils.pathExists(typePath)) {
+                        type = await fs.readFile(typePath, 'utf8');
+                        if (type !== this.type)
+                            throw new Error(`Wrong table version '${type}', expected '${this.type}'`);
                     } else {
                         if (query.verCompatMode) {
-                            await fs.writeFile(verPath, this.type);
+                            await fs.writeFile(typePath, this.type);
                         } else {
                             throw new Error(`Table version file not found`);
                         }
@@ -443,8 +440,7 @@ class Table {
 
     /*
     result = {
-        version: String,
-        inMemory: Boolean,
+        type: String,
         flag:  Array, [{name: 'flag1', check: '(r) => r.id > 10'}, ...]
         hash:  Array, [{field: 'field1', type: 'string', depth: 11, allowUndef: false}, ...]
         index: Array, [{field: 'field1', type: 'string', depth: 11, allowUndef: false}, ...]
@@ -455,7 +451,6 @@ class Table {
 
         return {
             type: this.type,
-            inMemory: this.inMemory,
             flag: this.reducer._listFlag(),
             hash: this.reducer._listHash(),
             index: this.reducer._listIndex(),

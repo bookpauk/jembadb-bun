@@ -3,6 +3,8 @@
 const fs = require('fs').promises;
 
 const Table = require('./Table');
+const TableMem = require('./TableMem');
+
 const LockQueue = require('./LockQueue');
 const utils = require('./utils');
 
@@ -168,6 +170,7 @@ class JembaDb {
         await this._tableLock(table).get();
         try {
             query = utils.cloneDeep(query);
+
             if (query.table) {
                 if (await this.tableExists({table: query.table}) && !query.quietIfExists) {
                     throw new Error(`Table '${query.table}' already exists`);
@@ -402,7 +405,12 @@ class JembaDb {
             let tableInstance = this.table.get(query.table);
 
             if (!tableInstance || !tableInstance.opened) {
-                tableInstance = new Table();
+
+                if (query.inMemory) {
+                    tableInstance = new TableMem();
+                } else {
+                    tableInstance = new Table();
+                }
                 this.table.set(query.table, tableInstance);
 
                 const opts = Object.assign({}, this.tableOpenDefaults, query);
@@ -419,13 +427,20 @@ class JembaDb {
         const result = [];
         const files = await fs.readdir(this.dbPath, { withFileTypes: true });
 
+        for (const table of this.table.keys()) {
+            result.push(table);
+        }
+
         for (const file of files) {
             if (file.isDirectory()) {
                 if (file.name.indexOf('___temporary_recreating') >= 0 ||
                     file.name.indexOf('___temporary_truncating') >= 0)
                     continue;
+
+                const tableInstance = this.table.get(file.name);
                 
-                result.push(file.name);
+                if (!tableInstance)
+                    result.push(file.name);
             }
         }
 
