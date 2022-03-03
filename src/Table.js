@@ -57,7 +57,7 @@ class Table {
         }
     }
 
-    async _cloneTable(srcTablePath, destTablePath, cloneSelf = false, cloneMeta = false, filter) {
+    async _cloneTable(srcTablePath, destTablePath, cloneSelf = false, noMeta = false, filter) {
         if (this.inMemory)
             throw new Error('_cloneTable error: inMemory source table');
 
@@ -92,7 +92,7 @@ class Table {
         }
 
         try {
-            if (cloneMeta)
+            if (!noMeta)
                 await reducerDest._load(true, `${srcTablePath}/meta.0`);
         } catch (e) {
             console.error(e);
@@ -150,30 +150,32 @@ class Table {
             }
         };
 
-        let rows = [];
-        for (const id of tableRowsFileSrc.getAllIds()) {
-            if (this.closed)
-                throw new Error('Table closed');
+        if (!nodata) {
+            let rows = [];
+            for (const id of tableRowsFileSrc.getAllIds()) {
+                if (this.closed)
+                    throw new Error('Table closed');
 
-            let row = null;
-            try {
-                row = await tableRowsFileSrc.getRow(id);
-            } catch(e) {
-                console.error(e);
-                continue;
+                let row = null;
+                try {
+                    row = await tableRowsFileSrc.getRow(id);
+                } catch(e) {
+                    console.error(e);
+                    continue;
+                }
+
+                if (!filterFunc(row))
+                    continue;
+
+                rows.push(row);
+                if (rows.length > 1000) {
+                    await putRows(rows);
+                    rows = [];
+                }
             }
-
-            if (!filterFunc(row))
-                continue;
-
-            rows.push(row);
-            if (rows.length > 1000) {
+            if (rows.length)
                 await putRows(rows);
-                rows = [];
-            }
         }
-        if (rows.length)
-            await putRows(rows);
 
         await tableRowsFileDest.saveDelta(0);
 
@@ -192,7 +194,7 @@ class Table {
     async _recreateTable() {
         const tempTablePath = `${this.tablePath}___temporary_recreating`;
 
-        await this._cloneTable(this.tablePath, tempTablePath, false, true);
+        await this._cloneTable(this.tablePath, tempTablePath);
 
         await fs.rmdir(this.tablePath, { recursive: true });
         await fs.rename(tempTablePath, this.tablePath);
@@ -902,7 +904,7 @@ class Table {
     query = {
     (!) toTablePath: String,
         filter: '(r) => true' || 'nodata',
-        cloneMeta: Boolean,
+        noMeta: Boolean,
     }
     result = {}
     */
@@ -923,7 +925,7 @@ class Table {
                 await utils.sleep(1);
             }
 
-            await this._cloneTable(this.tablePath, query.toTablePath, true, query.cloneMeta, query.filter);
+            await this._cloneTable(this.tablePath, query.toTablePath, true, query.noMeta, query.filter);
 
             return {};
         } finally {

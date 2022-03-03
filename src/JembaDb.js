@@ -282,33 +282,28 @@ class JembaDb {
         const table = query.table;
         await this._tableLock(table).get();
         try {
-            const tableInstance = this.table.get(query.table);
+            const tableInstance = this.table.get(table);
             if (tableInstance) {
-                //truncate
-                /*const oldQuery = tableInstance.openingQuery;
+                if (tableInstance.type === 'memory') {
+                    const newTableInstance = new TableMem();
 
-                const tablePath = oldQuery.tablePath;
-                const tempTablePath = `${tablePath}___temporary_truncating`;
-                await fs.rmdir(tempTablePath, { recursive: true });
+                    const opts = Object.assign({}, this.tableOpenDefaults);
+                    await newTableInstance.open(opts);
 
-                oldQuery.tablePath = tempTablePath;
-                const meta = await tableInstance.getMeta();
+                    await tableInstance.clone({toTableInstance: newTableInstance, filter: 'nodata'});
 
-                const newTableInstance = new Table();
-
-                await newTableInstance.open(oldQuery);
-                await newTableInstance.create(meta);
-
-                await this._drop(query);
-
-                if (oldQuery.inMemory) {
-                    this.table.set(query.table, newTableInstance);
+                    this.table.set(table, newTableInstance);
                 } else {
-                    await newTableInstance.close();
-                    await fs.rename(tempTablePath, tablePath);
-                }
+                    const toTable = `${table}___temporary_truncating`;
 
-                await this.open(query);*/
+                    await this._clone({table, toTable, filter: 'nodata'});
+
+                    await this.close({table: toTable});
+                    await this._drop(query);
+
+                    await fs.rename(`${this.dbPath}/${toTable}`, `${this.dbPath}/${table}`);
+                    await this.open(query);
+                }
 
                 return {};
             } else {
@@ -323,9 +318,9 @@ class JembaDb {
     /*
     query = {
     (!) table: 'tableName',
-    (!) toTable: String,
+    (!) toTable: 'tableName2',
         filter: '(r) => true' || 'nodata',
-        cloneMeta: Boolean,
+        noMeta: Boolean,
     }
     result = {}
     */
@@ -337,6 +332,16 @@ class JembaDb {
         if (!query.toTable)
             throw new Error(`'query.toTable' parameter is required`);
 
+        const table = query.table;
+        await this._tableLock(table).get();
+        try {
+            return await this._clone(query);
+        } finally {
+            this._tableLock(table).ret();
+        }
+    }
+
+    async _clone(query) {
         const tableInstance = this.table.get(query.table);
 
         if (tableInstance) {

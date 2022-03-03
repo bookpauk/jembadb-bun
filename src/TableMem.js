@@ -12,7 +12,7 @@ class TableMem extends Table {
     query = {
     (!) toTableInstance: TableMem,
         filter: '(r) => true' || 'nodata',
-        cloneMeta: Boolean,
+        noMeta: Boolean,
     }
     result = {}
     */
@@ -27,7 +27,7 @@ class TableMem extends Table {
         try {
             const newTableInstance = query.toTableInstance;
 
-            if (query.cloneMeta) {
+            if (!query.noMeta) {
                 const meta = await this.getMeta();
                 await newTableInstance.create(meta);
             }
