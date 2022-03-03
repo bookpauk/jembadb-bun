@@ -57,12 +57,21 @@ class Table {
         }
     }
 
-    async _cloneTable(srcTablePath, destTablePath, cloneSelf = false, cloneMeta = false) {
+    async _cloneTable(srcTablePath, destTablePath, cloneSelf = false, cloneMeta = false, filter) {
         if (this.inMemory)
             throw new Error('_cloneTable error: inMemory source table');
 
         await fs.rmdir(destTablePath, { recursive: true });
         await fs.mkdir(destTablePath, { recursive: true });
+
+        // '(r) => true' || 'nodata',
+        let filterFunc = null;
+        let nodata = (filter === 'nodata');
+        if (filter && !nodata) {
+            filterFunc = new Function(`'use strict'; return ${filter}`)();
+        } else {
+            filterFunc = () => true;
+        }
 
         let tableRowsFileSrc;
         if (cloneSelf) {
@@ -76,10 +85,12 @@ class Table {
         const reducerDest = new TableReducer(false, destTablePath, this.compressed, tableRowsFileDest);
 
         try {
-            await tableRowsFileSrc.loadCorrupted();
+            if (!nodata)
+                await tableRowsFileSrc.loadCorrupted();
         } catch (e) {
             console.error(e);
         }
+
         try {
             if (cloneMeta)
                 await reducerDest._load(true, `${srcTablePath}/meta.0`);
@@ -151,6 +162,9 @@ class Table {
                 console.error(e);
                 continue;
             }
+
+            if (!filterFunc(row))
+                continue;
 
             rows.push(row);
             if (rows.length > 1000) {

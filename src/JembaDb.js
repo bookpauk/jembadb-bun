@@ -349,11 +349,24 @@ class JembaDb {
 
                 await newTableInstance.open();
 
-                const meta = await tableInstance.getMeta();
+                if (query.cloneMeta) {
+                    const meta = await tableInstance.getMeta();
+                    await newTableInstance.create(meta);
+                }
 
-                await newTableInstance.create(meta);
-                const rows = await tableInstance.select();
-                await newTableInstance.insert({rows});
+                let filterFunc = null;
+                let nodata = (query.filter === 'nodata');
+                if (query.filter && !nodata) {
+                    filterFunc = new Function(`'use strict'; return ${query.filter}`)();
+                } else {
+                    filterFunc = () => true;
+                }
+
+                if (!nodata) {
+                    const rows = await tableInstance.select();
+                    const newRows = rows.filter(filterFunc);
+                    await newTableInstance.insert({rows: newRows});
+                }
 
                 this.table.set(query.toTable, newTableInstance);
 
@@ -361,7 +374,6 @@ class JembaDb {
             } else {
                 query = utils.cloneDeep(query);
                 query.toTablePath = `${this.dbPath}/${query.toTable}`;
-                query.cloneMeta = true;
 
                 await tableInstance.clone(query);
                 await this.open({table: query.toTable});
