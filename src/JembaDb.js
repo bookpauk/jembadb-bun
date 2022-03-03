@@ -340,39 +340,32 @@ class JembaDb {
         const tableInstance = this.table.get(query.table);
 
         if (tableInstance) {
-            if (!await this.tableExists({table: query.toTable})) {
+            if (await this.tableExists({table: query.toTable})) {
                 throw new Error(`Table '${query.toTable}' already exists`);
             }
 
-            /*
-            query = utils.cloneDeep(query);
-            query.toTablePath = `${this.dbPath}/${query.toTable}`;
+            if (tableInstance.type === 'memory') {
+                const newTableInstance = new TableMem();
 
-            if (tableInstance.inMemory) {
+                await newTableInstance.open();
+
                 const meta = await tableInstance.getMeta();
-                const newQuery = {inMemory: true};
 
-                const newTableInstance = new Table();
-
-                await newTableInstance.open(oldQuery);
                 await newTableInstance.create(meta);
+                const rows = await tableInstance.select();
+                await newTableInstance.insert({rows});
 
-                await this._drop(query);
+                this.table.set(query.toTable, newTableInstance);
 
-                if (oldQuery.inMemory) {
-                    this.table.set(query.table, newTableInstance);
-                } else {
-                    await newTableInstance.close();
-                    await fs.rename(tempTablePath, tablePath);
-                }
-
-                await this.open(query);
-
+                await this.open({table: query.toTable});
             } else {
+                query = utils.cloneDeep(query);
+                query.toTablePath = `${this.dbPath}/${query.toTable}`;
+                query.cloneMeta = true;
+
                 await tableInstance.clone(query);
                 await this.open({table: query.toTable});
             }
-            */
 
             return {};
         } else {

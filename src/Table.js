@@ -893,7 +893,7 @@ class Table {
     result = {}
     */
     async clone(query = {}) {
-        if (!this.inMemory) {
+        if (this.inMemory) {
             throw new Error(`inMemory table can't be cloned`);
         }
 
