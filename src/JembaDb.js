@@ -140,8 +140,9 @@ class JembaDb {
 
     /*
     query = {
-        table: 'tableName',
+    (*) table: 'tableName',
         quietIfExists: Boolean,
+        asSelect: Object, select query,
 
         type: 'basic' | 'memory' | 'huge', default 'basic'
         cacheSize: Number, 5
@@ -153,7 +154,7 @@ class JembaDb {
         lazyOpen: Boolean, false,
         typeCompatMode: Boolean, false,
 
-        in: 'tableName',
+    (*) in: 'tableName',
         flag:  Object || Array, {name: 'flag1', check: '(r) => r.id > 10'}
         hash:  Object || Array, {field: 'field1', type: 'string', depth: 11, allowUndef: false}
         index: Object || Array, {field: 'field1', type: 'string', depth: 11, allowUndef: false}
@@ -171,10 +172,16 @@ class JembaDb {
         try {
             query = utils.cloneDeep(query);
 
+            let rows = null;
+
             if (query.table) {
-                if (await this.tableExists({table: query.table}) && !query.quietIfExists) {
+                const exists = await this.tableExists({table: query.table});
+                if (exists && !query.quietIfExists) {
                     throw new Error(`Table '${query.table}' already exists`);
                 }
+
+                if (!exists && query.asSelect)
+                    rows = await this.select(query.asSelect);
             } else {
                 if (await this.tableExists({table: query.in})) {
                     query.table = query.in;
@@ -183,8 +190,14 @@ class JembaDb {
                 }            
             }
 
+            //create | open
             query.create = true;
             await this.open(query);
+
+            //asSelect
+            if (rows) {
+                await this.insert({table: query.table, rows})
+            }
 
             if (query.flag || query.hash || query.index) {
                 const tableInstance = this.table.get(query.table);
@@ -205,9 +218,9 @@ class JembaDb {
 
     /*
     query = {
-        table: 'tableName',
+    (*) table: 'tableName',
 
-        in: 'tableName',
+    (*) in: 'tableName',
         flag:  Object || Array, {name: 'flag1'}
         hash:  Object || Array, {field: 'field1'}
         index: Object || Array, {field: 'field1'}
