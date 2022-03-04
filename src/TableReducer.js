@@ -24,6 +24,8 @@ class TableReducer {
 
         this._deltas = new Map();
         this._fd = {};//file descriptors
+
+        this._items = new Map();
     }
 
     _getDelta(deltaStep) {
@@ -1012,6 +1014,22 @@ class TableReducer {
                 result.add(id);
         }
         return result;
+    }
+
+    async row(id) {
+        return await this._rowsInterface.getRow(id);
+    }
+
+    async setItem(name, item) {
+        this._items.set(name, item);
+    }
+
+    async getItem(name) {
+        return this._items.get(name);
+    }
+
+    async delItem(name) {
+        this._items.delete(name);
     }
 
     async and() {
