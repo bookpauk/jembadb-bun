@@ -50,12 +50,11 @@ class JembaDb {
         softLock: Boolean, false
         ignoreLock: Boolean, false,
 
-        //huge: {blockSize: 1000000, cacheSize: 1, fastMode: false},
-
         //table open defaults
         tableDefaults: {
             type: 'basic' | 'memory' | 'huge', default 'basic'
             cacheSize: Number, 5
+            blockSize: Number, 1000000, for huge table only
             compressed: Number, {0..9}, 0
             recreate: Boolean, false,
             autoRepair: Boolean, false,
@@ -146,6 +145,7 @@ class JembaDb {
 
         type: 'basic' | 'memory' | 'huge', default 'basic'
         cacheSize: Number, 5
+        blockSize: Number, 1000000, for huge table only
         compressed: Number, {0..9}, 0
         recreate: Boolean, false,
         autoRepair: Boolean, false,
@@ -379,6 +379,7 @@ class JembaDb {
 
         type: 'basic' | 'memory' | 'huge', default 'basic'
         cacheSize: Number, 5
+        blockSize: Number, 1000000, for huge table only
         compressed: Number, {0..9}, 0
         recreate: Boolean, false,
         autoRepair: Boolean, false,
@@ -443,6 +444,7 @@ class JembaDb {
     query = {
         type: 'basic' | 'memory' | 'huge', default 'basic'
         cacheSize: Number, 5
+        blockSize: Number, 1000000, for huge table only
         compressed: Number, {0..9}, 0
         recreate: Boolean, false,
         autoRepair: Boolean, false,
