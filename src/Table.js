@@ -209,7 +209,7 @@ class Table {
         autoRepair: Boolean, false,
         forceFileClosing: Boolean, false,
         lazyOpen: Boolean, false,
-        verCompatMode: Boolean, false,
+        typeCompatMode: Boolean, false,
     }
     */
     async _open(query = {}) {
@@ -256,12 +256,12 @@ class Table {
                     if (await utils.pathExists(typePath)) {
                         type = await fs.readFile(typePath, 'utf8');
                         if (type !== this.type)
-                            throw new Error(`Wrong table version '${type}', expected '${this.type}'`);
+                            throw new Error(`Wrong table type '${type}', expected '${this.type}'`);
                     } else {
-                        if (query.verCompatMode) {
+                        if (query.typeCompatMode) {
                             await fs.writeFile(typePath, this.type);
                         } else {
-                            throw new Error(`Table version file not found`);
+                            throw new Error(`Table type file not found`);
                         }
                     }
                 }

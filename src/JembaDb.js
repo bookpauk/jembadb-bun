@@ -61,7 +61,7 @@ class JembaDb {
             autoRepair: Boolean, false,
             forceFileClosing: Boolean, false,
             lazyOpen: Boolean, false,
-            verCompatMode: Boolean, false,
+            typeCompatMode: Boolean, false,
         },
     }
     */
@@ -151,7 +151,7 @@ class JembaDb {
         autoRepair: Boolean, false,
         forceFileClosing: Boolean, false,
         lazyOpen: Boolean, false,
-        verCompatMode: Boolean, false,
+        typeCompatMode: Boolean, false,
 
         in: 'tableName',
         flag:  Object || Array, {name: 'flag1', check: '(r) => r.id > 10'}
@@ -384,7 +384,7 @@ class JembaDb {
         autoRepair: Boolean, false,
         forceFileClosing: Boolean, false,
         lazyOpen: Boolean, false,
-        verCompatMode: Boolean, false,
+        typeCompatMode: Boolean, false,
     }
     */
     async open(query = {}) {
