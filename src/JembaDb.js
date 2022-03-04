@@ -54,7 +54,7 @@ class JembaDb {
 
         //table open defaults
         tableDefaults: {
-            inMemory: Boolean, false
+            type: 'basic' | 'memory' | 'huge', default 'basic'
             cacheSize: Number, 5
             compressed: Number, {0..9}, 0
             recreate: Boolean, false,
@@ -144,7 +144,7 @@ class JembaDb {
         table: 'tableName',
         quietIfExists: Boolean,
 
-        inMemory: Boolean, false
+        type: 'basic' | 'memory' | 'huge', default 'basic'
         cacheSize: Number, 5
         compressed: Number, {0..9}, 0
         recreate: Boolean, false,
@@ -377,7 +377,7 @@ class JembaDb {
     (!) table: 'tableName',
         create: Boolean, false,
 
-        inMemory: Boolean, false
+        type: 'basic' | 'memory' | 'huge', default 'basic'
         cacheSize: Number, 5
         compressed: Number, {0..9}, 0
         recreate: Boolean, false,
@@ -398,7 +398,7 @@ class JembaDb {
 
             if (!tableInstance || !tableInstance.opened) {
 
-                if (query.inMemory) {
+                if (query.type === 'memory') {
                     tableInstance = new TableMem();
                 } else {
                     tableInstance = new Table();
@@ -441,7 +441,7 @@ class JembaDb {
 
     /*
     query = {
-        inMemory: Boolean, false
+        type: 'basic' | 'memory' | 'huge', default 'basic'
         cacheSize: Number, 5
         compressed: Number, {0..9}, 0
         recreate: Boolean, false,
