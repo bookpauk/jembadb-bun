@@ -3,7 +3,7 @@
 class TableFlag {
     constructor(checkCode) {
         this.checkCode = checkCode;
-        this.checkFunc = eval(checkCode);
+        this.checkFunc = new Function(`'use strict'; return ${checkCode}`)();
 
         this.flag = new Set();
     }

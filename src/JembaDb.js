@@ -3,14 +3,19 @@
 const fs = require('fs').promises;
 
 const Table = require('./Table');
+const TableMem = require('./TableMem');
+
+const LockQueue = require('./LockQueue');
 const utils = require('./utils');
 
 /* API methods:
-openDb
-closeDb
+lock
+unlock
 
 create
 drop
+truncate
+clone
 
 open
 openAll
@@ -26,11 +31,15 @@ insert
 update
 delete
 
+markCorrupted
+
 esc
 */
 
 class JembaDb {
     constructor() {
+        this.tableLockMap = new Map();
+
         this.opened = false;
     }
 
@@ -41,17 +50,17 @@ class JembaDb {
         softLock: Boolean, false
         ignoreLock: Boolean, false,
 
-        //huge: {blockSize: 1000000, cacheSize: 1, fastMode: false},
-
         //table open defaults
         tableDefaults: {
-            inMemory: Boolean, false
+            type: 'basic' | 'memory' | 'huge', default 'basic'
             cacheSize: Number, 5
+            blockSize: Number, 1000000, for huge table only
             compressed: Number, {0..9}, 0
             recreate: Boolean, false,
             autoRepair: Boolean, false,
             forceFileClosing: Boolean, false,
             lazyOpen: Boolean, false,
+            typeCompatMode: Boolean, false,
         },
     }
     */
@@ -105,25 +114,47 @@ class JembaDb {
         //console.log('closed');
     }
 
-    checkOpened() {
+    _checkOpened() {
         if (!this.opened)
             throw new Error(`Database closed. Use 'db.lock' to lock & open database.`);
     }
 
+    async _checkTable(table) {
+        if (await this.tableExists({table})) {
+            throw new Error(`Table '${table}' has not been opened yet`);
+        } else {
+            throw new Error(`Table '${table}' does not exist`);
+        }
+    }
+
+    _tableLock(table) {
+        let queue = this.tableLockMap.get(table);
+        
+        if (!queue) {
+            queue = new LockQueue(100);
+            this.tableLockMap.set(table, queue);
+        }
+
+        return queue;
+    }
+
     /*
     query = {
-        table: 'tableName',
+    (*) table: 'tableName',
         quietIfExists: Boolean,
+        asSelect: Object, select query,
 
-        inMemory: Boolean, false
+        type: 'basic' | 'memory' | 'huge', default 'basic'
         cacheSize: Number, 5
+        blockSize: Number, 1000000, for huge table only
         compressed: Number, {0..9}, 0
         recreate: Boolean, false,
         autoRepair: Boolean, false,
         forceFileClosing: Boolean, false,
         lazyOpen: Boolean, false,
+        typeCompatMode: Boolean, false,
 
-        in: 'tableName',
+    (*) in: 'tableName',
         flag:  Object || Array, {name: 'flag1', check: '(r) => r.id > 10'}
         hash:  Object || Array, {field: 'field1', type: 'string', depth: 11, allowUndef: false}
         index: Object || Array, {field: 'field1', type: 'string', depth: 11, allowUndef: false}
@@ -131,49 +162,65 @@ class JembaDb {
     result = {}
     */
     async create(query = {}) {
-        this.checkOpened();
+        this._checkOpened();
 
         if ((!query.table && !query.in) || (query.table && query.in))
             throw new Error(`One of 'query.table' or 'query.in' parameters is required, but not both`);
 
-        let table;
-        if (query.table) {
-            if (await this.tableExists({table: query.table})) {
-                if (!query.quietIfExists)
+        const table = (query.table ? query.table : query.in);
+        await this._tableLock(table).get();
+        try {
+            query = utils.cloneDeep(query);
+
+            let rows = null;
+
+            if (query.table) {
+                const exists = await this.tableExists({table: query.table});
+                if (exists && !query.quietIfExists) {
                     throw new Error(`Table '${query.table}' already exists`);
+                }
 
-                table = this.table.get(query.table);
+                if (!exists && query.asSelect)
+                    rows = await this.select(query.asSelect);
             } else {
-                table = new Table();
-                this.table.set(query.table, table);
-
-                await this.open(query);
+                if (await this.tableExists({table: query.in})) {
+                    query.table = query.in;
+                } else {
+                    throw new Error(`Table '${query.in}' does not exist`);
+                }            
             }
-        } else {
-            if (await this.tableExists({table: query.in})) {
-                table = this.table.get(query.in);
-            } else {
-                throw new Error(`Table '${query.in}' does not exist`);
-            }            
-        }
 
-        if (query.flag || query.hash || query.index) {
-            await table.create({
-                quietIfExists: query.quietIfExists,
-                flag: query.flag,
-                hash: query.hash,
-                index: query.index,
-            });
-        }
+            //create | open
+            query.create = true;
+            await this.open(query);
 
-        return {};
+            //asSelect
+            if (rows) {
+                await this.insert({table: query.table, rows})
+            }
+
+            if (query.flag || query.hash || query.index) {
+                const tableInstance = this.table.get(query.table);
+
+                await tableInstance.create({
+                    quietIfExists: query.quietIfExists,
+                    flag: query.flag,
+                    hash: query.hash,
+                    index: query.index,
+                });
+            }
+
+            return {};
+        } finally {
+            this._tableLock(table).ret();
+        }
     }
 
     /*
     query = {
-        table: 'tableName',
+    (*) table: 'tableName',
 
-        in: 'tableName',
+    (*) in: 'tableName',
         flag:  Object || Array, {name: 'flag1'}
         hash:  Object || Array, {field: 'field1'}
         index: Object || Array, {field: 'field1'}
@@ -181,16 +228,26 @@ class JembaDb {
     result = {}
     */
     async drop(query = {}) {
-        this.checkOpened();
+        this._checkOpened();
 
         if ((!query.table && !query.in) || (query.table && query.in))
             throw new Error(`One of 'query.table' or 'query.in' parameters is required, but not both`);
 
+        const table = (query.table ? query.table : query.in);
+        await this._tableLock(table).get();
+        try {
+            return await this._drop(query);
+        } finally {
+            this._tableLock(table).ret();
+        }
+    }
+
+    async _drop(query = {}) {
         if (query.table) {
             if (await this.tableExists({table: query.table})) {
-                const table = this.table.get(query.table);
-                if (table && table.opened) {
-                    await table.close();
+                const tableInstance = this.table.get(query.table);
+                if (tableInstance && tableInstance.opened) {
+                    await tableInstance.close();
                 }
 
                 const basePath = `${this.dbPath}/${query.table}`;
@@ -202,11 +259,11 @@ class JembaDb {
             }
         } else {
             if (await this.tableExists({table: query.in})) {
-                const table = this.table.get(query.in);
+                const tableInstance = this.table.get(query.in);
 
-                if (table) {                
+                if (tableInstance) {                
                     if (query.flag || query.hash || query.index) {
-                        await table.drop({
+                        await tableInstance.drop({
                             flag: query.flag,
                             hash: query.hash,
                             index: query.index,
@@ -217,7 +274,7 @@ class JembaDb {
                 }
             } else {
                 throw new Error(`Table '${query.in}' does not exist`);
-            }            
+            }
         }
 
         return {};
@@ -226,36 +283,146 @@ class JembaDb {
     /*
     query = {
     (!) table: 'tableName',
+    }
+    result = {}
+    */
+    async truncate(query = {}) {
+        this._checkOpened();
 
-        inMemory: Boolean, false
+        if (!query.table)
+            throw new Error(`'query.table' parameter is required`);
+
+        const table = query.table;
+        await this._tableLock(table).get();
+        try {
+            const tableInstance = this.table.get(table);
+            if (tableInstance) {
+                if (tableInstance.type === 'memory') {
+                    const newTableInstance = new TableMem();
+
+                    const opts = Object.assign({}, this.tableOpenDefaults);
+                    await newTableInstance.open(opts);
+
+                    await tableInstance.clone({toTableInstance: newTableInstance, filter: 'nodata'});
+
+                    this.table.set(table, newTableInstance);
+                } else {
+                    const toTable = `${table}___temporary_truncating`;
+
+                    await this._clone({table, toTable, filter: 'nodata'});
+
+                    await this.close({table: toTable});
+                    await this._drop(query);
+
+                    await fs.rename(`${this.dbPath}/${toTable}`, `${this.dbPath}/${table}`);
+                    await this.open(query);
+                }
+
+                return {};
+            } else {
+                await this._checkTable(query.table);
+            }
+        } finally {
+            this._tableLock(table).ret();
+        }
+    }
+
+
+    /*
+    query = {
+    (!) table: 'tableName',
+    (!) toTable: 'tableName2',
+        filter: '(r) => true' || 'nodata',
+        noMeta: Boolean,
+    }
+    result = {}
+    */
+    async clone(query = {}) {
+        this._checkOpened();
+
+        if (!query.table)
+            throw new Error(`'query.table' parameter is required`);
+        if (!query.toTable)
+            throw new Error(`'query.toTable' parameter is required`);
+
+        const table = query.table;
+        await this._tableLock(table).get();
+        try {
+            return await this._clone(query);
+        } finally {
+            this._tableLock(table).ret();
+        }
+    }
+
+    async _clone(query) {
+        const tableInstance = this.table.get(query.table);
+
+        if (tableInstance) {
+            if (await this.tableExists({table: query.toTable})) {
+                throw new Error(`Table '${query.toTable}' already exists`);
+            }
+
+            if (tableInstance.type === 'memory') {
+                const newTableInstance = new TableMem();
+
+                const opts = Object.assign({}, this.tableOpenDefaults);
+                await newTableInstance.open(opts);
+
+                await tableInstance.clone(Object.assign({}, query, {toTableInstance: newTableInstance}));
+
+                this.table.set(query.toTable, newTableInstance);
+            } else {
+                query = utils.cloneDeep(query);
+                query.toTablePath = `${this.dbPath}/${query.toTable}`;
+
+                await tableInstance.clone(query);
+                await this.open({table: query.toTable});
+            }
+
+            return {};
+        } else {
+            await this._checkTable(query.table);
+        }
+    }
+
+    /*
+    query = {
+    (!) table: 'tableName',
+        create: Boolean, false,
+
+        type: 'basic' | 'memory' | 'huge', default 'basic'
         cacheSize: Number, 5
+        blockSize: Number, 1000000, for huge table only
         compressed: Number, {0..9}, 0
         recreate: Boolean, false,
         autoRepair: Boolean, false,
         forceFileClosing: Boolean, false,
         lazyOpen: Boolean, false,
+        typeCompatMode: Boolean, false,
     }
     */
     async open(query = {}) {
-        this.checkOpened();
+        this._checkOpened();
 
         if (!query.table)
             throw new Error(`'query.table' parameter is required`);
 
-        if (await this.tableExists({table: query.table})) {
-            let table = this.table.get(query.table);
+        if (await this.tableExists({table: query.table}) || query.create) {
+            let tableInstance = this.table.get(query.table);
 
-            if (!table) {
-                table = new Table();
-            }
+            if (!tableInstance || !tableInstance.opened) {
 
-            if (!table.opened) {
+                if (query.type === 'memory') {
+                    tableInstance = new TableMem();
+                } else {
+                    tableInstance = new Table();
+                }
+                this.table.set(query.table, tableInstance);
+
                 const opts = Object.assign({}, this.tableOpenDefaults, query);
-                opts.tablePath = `${this.dbPath}/${query.table}`;                
-                await table.open(opts);
+                opts.tablePath = `${this.dbPath}/${query.table}`;
+                await tableInstance.open(opts);
             }
-
-            this.table.set(query.table, table);
         } else {
             throw new Error(`Table '${query.table}' does not exist`);
         }
@@ -266,11 +433,20 @@ class JembaDb {
         const result = [];
         const files = await fs.readdir(this.dbPath, { withFileTypes: true });
 
+        for (const table of this.table.keys()) {
+            result.push(table);
+        }
+
         for (const file of files) {
             if (file.isDirectory()) {
-                if (file.name.indexOf('___temporary_recreating') >= 0)
+                if (file.name.indexOf('___temporary_recreating') >= 0 ||
+                    file.name.indexOf('___temporary_truncating') >= 0)
                     continue;
-                result.push(file.name);
+
+                const tableInstance = this.table.get(file.name);
+                
+                if (!tableInstance)
+                    result.push(file.name);
             }
         }
 
@@ -279,8 +455,9 @@ class JembaDb {
 
     /*
     query = {
-        inMemory: Boolean, false
+        type: 'basic' | 'memory' | 'huge', default 'basic'
         cacheSize: Number, 5
+        blockSize: Number, 1000000, for huge table only
         compressed: Number, {0..9}, 0
         recreate: Boolean, false,
         autoRepair: Boolean, false,
@@ -289,13 +466,13 @@ class JembaDb {
     }
     */
     async openAll(query = {}) {
-        this.checkOpened();
+        this._checkOpened();
 
         const tables = await this._getTableList();
 
         //sequentially
         for (const table of tables) {
-            this.checkOpened();
+            this._checkOpened();
             await this.open(Object.assign({}, query, {table}));
         }
 
@@ -312,16 +489,16 @@ class JembaDb {
     }
     */
     async close(query = {}) {
-        this.checkOpened();
+        this._checkOpened();
 
         if (!query.table)
             throw new Error(`'query.table' parameter is required`);
 
         if (await this.tableExists({table: query.table})) {
-            let table = this.table.get(query.table);
+            let tableInstance = this.table.get(query.table);
 
-            if (table) {
-                await table.close();
+            if (tableInstance) {
+                await tableInstance.close();
             }
 
             this.table.delete(query.table);
@@ -331,7 +508,7 @@ class JembaDb {
     }
 
     async closeAll() {
-        this.checkOpened();
+        this._checkOpened();
 
         const promises = [];
         for (const table of this.table.keys()) {
@@ -347,7 +524,7 @@ class JembaDb {
     result = Boolean
     */
     async tableExists(query = {}) {
-        this.checkOpened();
+        this._checkOpened();
 
         if (!query.table)
             throw new Error(`'query.table' parameter is required`);
@@ -373,7 +550,7 @@ class JembaDb {
     }
     */
     async getDbInfo(query = {}) {
-        this.checkOpened();
+        this._checkOpened();
 
         const tables = await this._getTableList();
 
@@ -403,7 +580,7 @@ class JembaDb {
     }
     */
     async getDbSize() {
-        this.checkOpened();
+        this._checkOpened();
 
         const dirs = await fs.readdir(this.dbPath, { withFileTypes: true });
 
@@ -451,23 +628,15 @@ class JembaDb {
     result = Array
     */
     async select(query = {}) {
-        this.checkOpened();
+        this._checkOpened();
 
         if (!query.table)
             throw new Error(`'query.table' parameter is required`);
 
-        const checkTable = async(table) => {
-            if (await this.tableExists({table})) {
-                throw new Error(`Table '${table}' has not been opened yet`);
-            } else {
-                throw new Error(`Table '${table}' does not exist`);
-            }
-        };
-
-        const table = this.table.get(query.table);
-        if (table) {
+        const tableInstance = this.table.get(query.table);
+        if (tableInstance) {
             //select
-            const resultRows = await table.select(query);
+            const resultRows = await tableInstance.select(query);
 
             //joinById
             if (query.joinById) {
@@ -480,12 +649,12 @@ class JembaDb {
                         throw new Error(`'joinById.on' parameter is required`);
 
 
-                    const joinTable = this.table.get(join.table);
-                    if (joinTable) {
+                    const joinTableInstance = this.table.get(join.table);
+                    if (joinTableInstance) {
                         const on = join.on;
                         const ids = resultRows.map((r) => r[on]);
 
-                        const joinRows = await joinTable.select({where: `@@id(${this.esc(ids)})`});
+                        const joinRows = await joinTableInstance.select({where: `@@id(${this.esc(ids)})`});
 
                         let mapFunc = null;
                         if (join.map) {
@@ -502,14 +671,14 @@ class JembaDb {
                             row[out] = idMap.get(row[on]);
                         }
                     } else {
-                        await checkTable(joinTable);
+                        await this._checkTable(join.table);
                     }
                 }
             }
 
             return resultRows;
         } else {
-            await checkTable(query.table);
+            await this._checkTable(query.table);
         }
     }
 
@@ -525,20 +694,16 @@ class JembaDb {
     }
     */
     async insert(query = {}) {
-        this.checkOpened();
+        this._checkOpened();
 
         if (!query.table)
             throw new Error(`'query.table' parameter is required`);
 
-        const table = this.table.get(query.table);
-        if (table) {
-            return await table.insert(query);
+        const tableInstance = this.table.get(query.table);
+        if (tableInstance) {
+            return await tableInstance.insert(query);
         } else {
-            if (await this.tableExists({table: query.table})) {
-                throw new Error(`Table '${query.table}' has not been opened yet`);
-            } else {
-                throw new Error(`Table '${query.table}' does not exist`);
-            }
+            await this._checkTable(query.table);
         }
     }
 
@@ -556,20 +721,16 @@ class JembaDb {
     }
     */
     async update(query = {}) {
-        this.checkOpened();
+        this._checkOpened();
 
         if (!query.table)
             throw new Error(`'query.table' parameter is required`);
 
-        const table = this.table.get(query.table);
-        if (table) {
-            return await table.update(query);
+        const tableInstance = this.table.get(query.table);
+        if (tableInstance) {
+            return await tableInstance.update(query);
         } else {
-            if (await this.tableExists({table: query.table})) {
-                throw new Error(`Table '${query.table}' has not been opened yet`);
-            } else {
-                throw new Error(`Table '${query.table}' does not exist`);
-            }
+            await this._checkTable(query.table);
         }
     }
 
@@ -586,20 +747,38 @@ class JembaDb {
     }
     */
     async delete(query = {}) {
-        this.checkOpened();
+        this._checkOpened();
 
         if (!query.table)
             throw new Error(`'query.table' parameter is required`);
 
-        const table = this.table.get(query.table);
-        if (table) {
-            return await table.delete(query);
+        const tableInstance = this.table.get(query.table);
+        if (tableInstance) {
+            return await tableInstance.delete(query);
         } else {
-            if (await this.tableExists({table: query.table})) {
-                throw new Error(`Table '${query.table}' has not been opened yet`);
-            } else {
-                throw new Error(`Table '${query.table}' does not exist`);
-            }
+            await this._checkTable(query.table);
+        }
+    }
+
+    /*
+    query = {
+        message: String,
+    }
+    result = {}
+    */
+    async markCorrupted(query = {}) {
+        this._checkOpened();
+
+        if (!query.table)
+            throw new Error(`'query.table' parameter is required`);
+
+        const tableInstance = this.table.get(query.table);
+        if (tableInstance) {
+            await tableInstance.markCorrupted(query);
+            await this.close(query);
+            return {};
+        } else {
+            await this._checkTable(query.table);
         }
     }
 

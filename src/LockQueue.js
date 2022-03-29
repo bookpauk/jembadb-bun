@@ -7,13 +7,7 @@ class LockQueue {
         this.waitingQueue = [];
     }
 
-    ret() {
-        this.freed = true;
-        if (this.waitingQueue.length) {
-            this.waitingQueue.shift().onFreed();
-        }
-    }
-
+    //async
     get(take = true) {
         return new Promise((resolve) => {
             if (this.freed) {
@@ -28,13 +22,32 @@ class LockQueue {
 
             this.waitingQueue.push({
                 onFreed: () => {
-                    if (take)
-                        this.freed = false;
                     resolve();
                 },
             });
         });
     }
+
+    ret() {
+        if (this.waitingQueue.length) {
+            this.waitingQueue.shift().onFreed();
+        } else {
+            this.freed = true;
+        }
+    }
+
+    //async
+    wait() {
+        return this.get(false);
+    }
+
+    free() {
+        while (this.waitingQueue.length) {
+            this.waitingQueue.shift().onFreed();
+        }
+        this.freed = true;
+    }
+
 }
 
 module.exports = LockQueue;

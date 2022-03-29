@@ -12,6 +12,8 @@ const maxChangesLength = 10;
 
 class Table {
     constructor() {
+        this.type = 'basic';
+
         this.rowsInterface = new TableRowsMem();
 
         this.autoIncrement = 0;
@@ -27,7 +29,6 @@ class Table {
 
         //table options defaults
         this.inMemory = false;
-        this.compressed = 0;
         this.cacheSize = 5;
         this.compressed = 0;
         this.recreate = false;
@@ -35,7 +36,7 @@ class Table {
         this.forceFileClosing = false;
     }
 
-    checkErrors() {
+    _checkErrors() {
         if (this.fileError)
             throw new Error(this.fileError);
 
@@ -46,7 +47,7 @@ class Table {
             throw new Error('Table has not been opened yet');
     }
 
-    async waitForSaveChanges() {
+    async _waitForSaveChanges() {
         if (this.changes.length > maxChangesLength) {
             let i = this.changes.length - maxChangesLength;
             while (i > 0 && this.changes.length > maxChangesLength) {
@@ -56,23 +57,43 @@ class Table {
         }
     }
 
-    async recreateTable() {
-        const tempTablePath = `${this.tablePath}___temporary_recreating`;
-        await fs.rmdir(tempTablePath, { recursive: true });
-        await fs.mkdir(tempTablePath, { recursive: true });
+    async _cloneTable(srcTablePath, destTablePath, cloneSelf = false, noMeta = false, filter) {
+        if (this.inMemory)
+            throw new Error('_cloneTable error: inMemory source table');
 
-        const tableRowsFileSrc = new TableRowsFile(this.tablePath, this.cacheSize);
+        await fs.rmdir(destTablePath, { recursive: true });
+        await fs.mkdir(destTablePath, { recursive: true });
 
-        const tableRowsFileDest = new TableRowsFile(tempTablePath, this.cacheSize, this.compressed);
-        const reducerDest = new TableReducer(false, tempTablePath, this.compressed, tableRowsFileDest);
+        // '(r) => true' || 'nodata',
+        let filterFunc = null;
+        let nodata = (filter === 'nodata');
+        if (filter && !nodata) {
+            filterFunc = new Function(`'use strict'; return ${filter}`)();
+        } else {
+            filterFunc = () => true;
+        }
+
+        let tableRowsFileSrc;
+        if (cloneSelf) {
+            srcTablePath = this.tablePath;
+            tableRowsFileSrc = this.tableRowsFile;
+        } else {
+            tableRowsFileSrc = new TableRowsFile(srcTablePath, this.cacheSize);
+        }
+
+        const tableRowsFileDest = new TableRowsFile(destTablePath, this.cacheSize, this.compressed);
+        const reducerDest = new TableReducer(false, destTablePath, this.compressed, tableRowsFileDest);
 
         try {
-            await tableRowsFileSrc.loadCorrupted();
+            if (!nodata)
+                await tableRowsFileSrc.loadCorrupted();
         } catch (e) {
             console.error(e);
         }
+
         try {
-            await reducerDest._load(true, `${this.tablePath}/meta.0`);
+            if (!noMeta)
+                await reducerDest._load(true, `${srcTablePath}/meta.0`);
         } catch (e) {
             console.error(e);
         }
@@ -129,27 +150,32 @@ class Table {
             }
         };
 
-        let rows = [];
-        for (const id of tableRowsFileSrc.getAllIds()) {
-            if (this.closed)
-                throw new Error('Table closed');
+        if (!nodata) {
+            let rows = [];
+            for (const id of tableRowsFileSrc.getAllIds()) {
+                if (this.closed)
+                    throw new Error('Table closed');
 
-            let row = null;
-            try {
-                row = await tableRowsFileSrc.getRow(id);
-            } catch(e) {
-                console.error(e);
-                continue;
+                let row = null;
+                try {
+                    row = await tableRowsFileSrc.getRow(id);
+                } catch(e) {
+                    console.error(e);
+                    continue;
+                }
+
+                if (!filterFunc(row))
+                    continue;
+
+                rows.push(row);
+                if (rows.length > 1000) {
+                    await putRows(rows);
+                    rows = [];
+                }
             }
-
-            rows.push(row);
-            if (rows.length > 1000) {
+            if (rows.length)
                 await putRows(rows);
-                rows = [];
-            }
         }
-        if (rows.length)
-            await putRows(rows);
 
         await tableRowsFileDest.saveDelta(0);
 
@@ -161,7 +187,14 @@ class Table {
         await reducerDest._destroy();
         await tableRowsFileDest.destroy();        
 
-        await fs.writeFile(`${tempTablePath}/state`, '1');
+        await fs.writeFile(`${destTablePath}/state`, '1');
+        await fs.writeFile(`${destTablePath}/type`, this.type);
+    }
+
+    async _recreateTable() {
+        const tempTablePath = `${this.tablePath}___temporary_recreating`;
+
+        await this._cloneTable(this.tablePath, tempTablePath);
 
         await fs.rmdir(this.tablePath, { recursive: true });
         await fs.rename(tempTablePath, this.tablePath);
@@ -170,18 +203,19 @@ class Table {
     /*
     query: {
         tablePath: String,
-        inMemory: Boolean,
         cacheSize: Number,
         compressed: Number, 0..9
         recreate: Boolean, false,
         autoRepair: Boolean, false,
         forceFileClosing: Boolean, false,
         lazyOpen: Boolean, false,
+        typeCompatMode: Boolean, false,
     }
     */
     async _open(query = {}) {
         if (this.opening)
-            return;
+            throw new Error('Table open in progress');
+
         this.opening = true;
         await this.openingLock.get();
         //console.log(query);
@@ -190,8 +224,6 @@ class Table {
                 throw new Error('Table has already been opened');
             if (this.closed)
                 throw new Error('Table instance has been destroyed. Please create a new one.');
-
-            this.inMemory = !!query.inMemory;
 
             if (this.inMemory) {
                 this.reducer = new TableReducer(this.inMemory, '', 0, this.rowsInterface);
@@ -206,50 +238,70 @@ class Table {
                 this.autoRepair = query.autoRepair || false;
                 this.forceFileClosing = query.forceFileClosing || false;
 
-                await fs.mkdir(this.tablePath, { recursive: true });
+                let create = true;
+                if (await utils.pathExists(this.tablePath)) {
+                    create = false;
+                } else {
+                    await fs.mkdir(this.tablePath, { recursive: true });
+                }
 
-                this.tableRowsFile = new TableRowsFile(query.tablePath, this.cacheSize, this.compressed);
-                this.rowsInterface = this.tableRowsFile;
-
-                this.reducer = new TableReducer(this.inMemory, this.tablePath, this.compressed, this.rowsInterface);
-
+                //check table version
                 const statePath = `${this.tablePath}/state`;
+                const typePath = `${this.tablePath}/type`;
+                if (create) {
+                    await fs.writeFile(typePath, this.type);
+                    await fs.writeFile(statePath, '1');
+                } else {
+                    let type = null;
+                    if (await utils.pathExists(typePath)) {
+                        type = await fs.readFile(typePath, 'utf8');
+                        if (type !== this.type)
+                            throw new Error(`Wrong table type '${type}', expected '${this.type}'`);
+                    } else {
+                        if (query.typeCompatMode) {
+                            await fs.writeFile(typePath, this.type);
+                        } else {
+                            throw new Error(`Table type file not found`);
+                        }
+                    }
+                }
+
+                //check table state
                 let state = null;
                 if (await utils.pathExists(statePath)) {
                     state = await fs.readFile(statePath, 'utf8');
                 }
 
-                if (state === null) {//check if other files exists
-                    const files = await fs.readdir(this.tablePath);
-                    if (files.length)
-                        state = '0';
-                }
-
                 if (this.recreate) {
-                    await this.recreateTable();
+                    await this._recreateTable();
                     state = '1';
                 }
 
-                if (state !== null) {
-                    try {
-                        if (state === '1') {
-                            // load tableRowsFile & reducer
-                            this.autoIncrement = await this.tableRowsFile.load();
-                            await this.reducer._load();
-                        } else {
-                            throw new Error('Table corrupted')
-                        }
-                    } catch(e) {
-                        if (this.autoRepair) {
-                            console.error(e.message);
-                            await this.recreateTable();
-                        } else {
-                            throw e;
-                        }
+                //table rows & reducer
+                this.tableRowsFile = new TableRowsFile(query.tablePath, this.cacheSize, this.compressed);
+                this.rowsInterface = this.tableRowsFile;
+
+                this.reducer = new TableReducer(this.inMemory, this.tablePath, this.compressed, this.rowsInterface);
+
+                //load
+                try {
+                    if (state === '1') {
                         // load tableRowsFile & reducer
                         this.autoIncrement = await this.tableRowsFile.load();
                         await this.reducer._load();
+                    } else {
+                        throw new Error('Table corrupted')
                     }
+                } catch(e) {
+                    if (this.autoRepair) {
+                        console.error(e.message);
+                        await this._recreateTable();
+                    } else {
+                        throw e;
+                    }
+                    // load tableRowsFile & reducer
+                    this.autoIncrement = await this.tableRowsFile.load();
+                    await this.reducer._load();
                 }
             }
 
@@ -262,7 +314,7 @@ class Table {
             else
                 this.fileError = errMes;
         } finally {
-            this.openingLock.ret();
+            this.openingLock.free();
             this.opening = false;
         }
     }
@@ -288,6 +340,14 @@ class Table {
             }
         }
 
+        if (this.fileError) {
+            try {
+                await this._saveState('0');
+            } catch(e) {
+                //
+            }
+        }
+
         //for GC
         if (this.reducer)
             await this.reducer._destroy();
@@ -309,8 +369,8 @@ class Table {
     result = {}
     */
     async create(query) {
-        await this.openingLock.get(false);
-        this.checkErrors();
+        await this.openingLock.wait();
+        this._checkErrors();
 
         await this.lock.get();
         try {
@@ -342,7 +402,7 @@ class Table {
 
             return {};
         } finally {
-            this.saveChanges();//no await
+            this._saveChanges();//no await
             this.lock.ret();
         }
     }
@@ -356,8 +416,8 @@ class Table {
     result = {}
     */
     async drop(query) {
-        await this.openingLock.get(false);
-        this.checkErrors();
+        await this.openingLock.wait();
+        this._checkErrors();
 
         await this.lock.get();
         try {
@@ -389,31 +449,31 @@ class Table {
 
             return {};
         } finally {
-            this.saveChanges();//no await
+            this._saveChanges();//no await
             this.lock.ret();
         }
     }
 
     /*
     result = {
-        inMemory: Boolean,
+        type: String,
         flag:  Array, [{name: 'flag1', check: '(r) => r.id > 10'}, ...]
         hash:  Array, [{field: 'field1', type: 'string', depth: 11, allowUndef: false}, ...]
         index: Array, [{field: 'field1', type: 'string', depth: 11, allowUndef: false}, ...]
     }
     */
     async getMeta() {
-        this.checkErrors();
+        this._checkErrors();
 
         return {
-            inMemory: this.inMemory,
+            type: this.type,
             flag: this.reducer._listFlag(),
             hash: this.reducer._listHash(),
             index: this.reducer._listIndex(),
         };
     }
 
-    prepareWhere(where) {
+    _prepareWhere(where) {
         if (typeof(where) !== 'string')
             throw new Error('query.where must be a string');
 
@@ -434,13 +494,13 @@ class Table {
     result = Array
     */
     async select(query = {}) {
-        await this.openingLock.get(false);
-        this.checkErrors();
+        await this.openingLock.wait();
+        this._checkErrors();
 
         let ids;//iterator
         //where condition
         if (query.where) {
-            const where = this.prepareWhere(query.where);
+            const where = this._prepareWhere(query.where);
             const whereFunc = new Function(`'use strict'; return ${where}`)();
 
             ids = await whereFunc(this.reducer);
@@ -564,8 +624,8 @@ class Table {
     }
     */
     async insert(query = {}) {
-        await this.openingLock.get(false);
-        this.checkErrors();
+        await this.openingLock.wait();
+        this._checkErrors();
 
         await this.lock.get();
         try {
@@ -632,10 +692,10 @@ class Table {
                 throw e;
             }
 
-            await this.waitForSaveChanges();
+            await this._waitForSaveChanges();
             return result;
         } finally {
-            this.saveChanges();//no await
+            this._saveChanges();//no await
             this.lock.ret();
         }
     }
@@ -653,8 +713,8 @@ class Table {
     }
     */
     async update(query = {}) {
-        await this.openingLock.get(false);
-        this.checkErrors();
+        await this.openingLock.wait();
+        this._checkErrors();
 
         await this.lock.get();
         try {
@@ -666,7 +726,7 @@ class Table {
             //where
             let ids;//iterator
             if (query.where) {
-                const where = this.prepareWhere(query.where);
+                const where = this._prepareWhere(query.where);
                 const whereFunc = new Function(`'use strict'; return ${where}`)();
 
                 ids = await whereFunc(this.reducer);
@@ -738,10 +798,10 @@ class Table {
                 throw e;
             }
 
-            await this.waitForSaveChanges();
+            await this._waitForSaveChanges();
             return result;
         } finally {
-            this.saveChanges();//no await
+            this._saveChanges();//no await
             this.lock.ret();
         }
     }
@@ -758,15 +818,15 @@ class Table {
     }
     */
     async delete(query = {}) {
-        await this.openingLock.get(false);
-        this.checkErrors();
+        await this.openingLock.wait();
+        this._checkErrors();
 
         await this.lock.get();
         try {
             //where
             let ids;//iterator
             if (query.where) {
-                const where = this.prepareWhere(query.where);
+                const where = this._prepareWhere(query.where);
                 const whereFunc = new Function(`'use strict'; return ${where}`)();
 
                 ids = await whereFunc(this.reducer);
@@ -819,19 +879,65 @@ class Table {
                 throw e;
             }
 
-            await this.waitForSaveChanges();
+            await this._waitForSaveChanges();
             return result;
         } finally {
-            this.saveChanges();//no await
+            this._saveChanges();//no await
             this.lock.ret();
         }
     }
 
-    async saveState(state) {
+    /*
+    query = {
+        message: String,
+    }
+    result = {}
+    */
+    async markCorrupted(query = {}) {
+        this.fileError = query.message || 'Table corrupted';
+        await this.close();
+
+        return {};
+    }
+
+    /*
+    query = {
+    (!) toTablePath: String,
+        filter: '(r) => true' || 'nodata',
+        noMeta: Boolean,
+    }
+    result = {}
+    */
+    async clone(query = {}) {
+        if (this.inMemory) {
+            throw new Error(`inMemory table can't be cloned`);
+        }
+
+        if (!query.toTablePath || typeof(query.toTablePath) !== 'string')
+            throw new Error(`'query.toTablePath' parameter is required`);
+
+        await this.openingLock.wait();
+        this._checkErrors();
+
+        await this.lock.get();
+        try {
+            while (this.savingChanges) {
+                await utils.sleep(1);
+            }
+
+            await this._cloneTable(this.tablePath, query.toTablePath, true, query.noMeta, query.filter);
+
+            return {};
+        } finally {
+            this.lock.ret();
+        }
+    }
+
+    async _saveState(state) {
         await fs.writeFile(`${this.tablePath}/state`, state);
     }
 
-    async saveChanges() {
+    async _saveChanges() {
         this.needSaveChanges = true;
         if (this.savingChanges)
             return;
@@ -842,7 +948,7 @@ class Table {
         }
 
         try {
-            this.checkErrors();
+            this._checkErrors();
         } catch(e) {
             return;
         }
@@ -854,7 +960,7 @@ class Table {
             while (this.needSaveChanges) {
                 this.needSaveChanges = false;
 
-                await this.saveState('0');
+                await this._saveState('0');
                 while (this.changes.length) {
 
                     const len = this.changes.length;
@@ -874,7 +980,7 @@ class Table {
 
                     this.changes = this.changes.slice(i);
                 }
-                await this.saveState('1');
+                await this._saveState('1');
 
                 if (this.forceFileClosing) {
                     await this.tableRowsFile.closeAllFiles();

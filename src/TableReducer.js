@@ -24,6 +24,8 @@ class TableReducer {
 
         this._deltas = new Map();
         this._fd = {};//file descriptors
+
+        this._items = new Map();
     }
 
     _getDelta(deltaStep) {
@@ -1005,13 +1007,29 @@ class TableReducer {
         const result = new Set();
         for (const id of ids) {
             const row = await this._rowsInterface.getRow(id);
-            const checkResult = checkFunc(row);
+            const checkResult = checkFunc(utils.cloneDeep(row));
             if (checkResult === undefined)
                 break;
             if (checkResult)
                 result.add(id);
         }
         return result;
+    }
+
+    async row(id) {
+        return utils.cloneDeep(await this._rowsInterface.getRow(id));
+    }
+
+    async setItem(name, item) {
+        this._items.set(name, item);
+    }
+
+    async getItem(name) {
+        return this._items.get(name);
+    }
+
+    async delItem(name) {
+        this._items.delete(name);
     }
 
     async and() {

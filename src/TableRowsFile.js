@@ -212,7 +212,7 @@ class TableRowsFile {
                 buf = buf.toString();
             } else {//corrupted or empty
                 buf = buf.toString();
-                if (this.loadCorrupted) {
+                if (this.allowCorrupted) {
                     const lastComma = buf.lastIndexOf(',');
                     if (lastComma >= 0)
                         buf = buf.substring(0, lastComma);
@@ -578,7 +578,7 @@ class TableRowsFile {
     }
 
     async loadCorrupted() {
-        this.loadCorrupted = true;
+        this.allowCorrupted = true;
 
         const loadBlockIndex = (fileNum, data) => {
             if (fileNum === 0) {//dumped data
