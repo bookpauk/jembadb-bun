@@ -1007,7 +1007,7 @@ class TableReducer {
         const result = new Set();
         for (const id of ids) {
             const row = await this._rowsInterface.getRow(id);
-            const checkResult = checkFunc(row);
+            const checkResult = checkFunc(utils.cloneDeep(row));
             if (checkResult === undefined)
                 break;
             if (checkResult)
@@ -1017,7 +1017,7 @@ class TableReducer {
     }
 
     async row(id) {
-        return await this._rowsInterface.getRow(id);
+        return utils.cloneDeep(await this._rowsInterface.getRow(id));
     }
 
     async setItem(name, item) {
