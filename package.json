@@ -1,6 +1,6 @@
 {
   "name": "jembadb",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Json Embeddable Appendable Database",
   "main": "./src/index.js",
   "scripts": {
