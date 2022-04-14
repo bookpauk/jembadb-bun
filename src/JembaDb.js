@@ -2,8 +2,8 @@
 
 const fs = require('fs').promises;
 
-const Table = require('./Table');
-const TableMem = require('./TableMem');
+const BasicTable = require('./BasicTable');
+const MemoryTable = require('./MemoryTable');
 
 const LockQueue = require('./LockQueue');
 const utils = require('./utils');
@@ -298,7 +298,7 @@ class JembaDb {
             const tableInstance = this.table.get(table);
             if (tableInstance) {
                 if (tableInstance.type === 'memory') {
-                    const newTableInstance = new TableMem();
+                    const newTableInstance = new MemoryTable();
 
                     const opts = Object.assign({}, this.tableOpenDefaults);
                     await newTableInstance.open(opts);
@@ -363,7 +363,7 @@ class JembaDb {
             }
 
             if (tableInstance.type === 'memory') {
-                const newTableInstance = new TableMem();
+                const newTableInstance = new MemoryTable();
 
                 const opts = Object.assign({}, this.tableOpenDefaults);
                 await newTableInstance.open(opts);
@@ -413,9 +413,9 @@ class JembaDb {
             if (!tableInstance || !tableInstance.opened) {
 
                 if (query.type === 'memory') {
-                    tableInstance = new TableMem();
+                    tableInstance = new MemoryTable();
                 } else {
-                    tableInstance = new Table();
+                    tableInstance = new BasicTable();
                 }
                 this.table.set(query.table, tableInstance);
 
