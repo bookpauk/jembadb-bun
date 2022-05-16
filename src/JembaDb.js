@@ -762,6 +762,7 @@ class JembaDb {
 
     /*
     query = {
+    (!) table: 'tableName',
         message: String,
     }
     result = {}
