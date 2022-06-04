@@ -9,7 +9,7 @@ const maxBlockSize = 1024*1024;//bytes
 const minFileDumpSize = 100*1024;//bytes
 const maxFileDumpSize = 50*1024*1024;//bytes
 const defragAfter = 10;
-const defragBlockCountAtOnce = 10;//better >= defragAfter
+const defragBlockCountAtOnce = 1;
 
 class TableRowsFile {
     constructor(tablePath, cacheSize, compressed) {
