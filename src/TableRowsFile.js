@@ -27,6 +27,7 @@ class TableRowsFile {
         this.deltas = new Map();
 
         this.defragCounter = 0;
+        this.defragTriggerCoeff = 0.5;
         this.destroyed = false;
 
         this.blockindex0Size = 0;
@@ -373,9 +374,18 @@ class TableRowsFile {
                     if (!block.final)
                         continue;
 
-                    if (block.addCount - block.delCount < block.rowsLength/2 || block.size < maxBlockSize/2) {
+                    if ( (block.delCount > 0 && block.addCount - block.delCount < block.rowsLength*this.defragTriggerCoeff)
+                        || block.size < maxBlockSize/2
+                        ) {
                         this.defragCandidates.push(block);
                     }
+                }
+
+                if (!this.defragCandidates.length) {
+                    this.defragTriggerCoeff += 0.1;
+                    this.defragTriggerCoeff = (this.defragTriggerCoeff > 1 ? 1 : this.defragTriggerCoeff);
+                } else {
+                    this.defragTriggerCoeff = 0.5;
                 }
 
                 this.defragCounter = 0;
