@@ -308,6 +308,7 @@ class JembaDb {
                     this.table.set(table, newTableInstance);
                 } else {
                     const toTable = `${table}___temporary_truncating`;
+                    await fs.rmdir(`${this.dbPath}/${toTable}`, { recursive: true });
 
                     await this._clone({table, toTable, filter: 'nodata'});
 
