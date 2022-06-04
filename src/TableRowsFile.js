@@ -385,6 +385,8 @@ class TableRowsFile {
                     this.defragTriggerCoeff += 0.1;
                     this.defragTriggerCoeff = (this.defragTriggerCoeff > 1 ? 1 : this.defragTriggerCoeff);
                 } else {
+                    if (this.defragTriggerCoeff > 0.7)
+                        this.defragCandidates = this.defragCandidates.slice(0, 2);
                     this.defragTriggerCoeff = 0.5;
                 }
 
