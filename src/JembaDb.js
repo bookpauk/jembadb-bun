@@ -60,7 +60,6 @@ class JembaDb {
             recreate: Boolean, false,
             autoRepair: Boolean, false,
             forceFileClosing: Boolean, false,
-            lazyOpen: Boolean, false,
             typeCompatMode: Boolean, false,
         },
     }
@@ -153,7 +152,6 @@ class JembaDb {
         recreate: Boolean, false,
         autoRepair: Boolean, false,
         forceFileClosing: Boolean, false,
-        lazyOpen: Boolean, false,
         typeCompatMode: Boolean, false,
 
     (*) in: 'tableName',
@@ -400,7 +398,6 @@ class JembaDb {
         recreate: Boolean, false,
         autoRepair: Boolean, false,
         forceFileClosing: Boolean, false,
-        lazyOpen: Boolean, false,
         typeCompatMode: Boolean, false,
     }
     */
@@ -466,7 +463,6 @@ class JembaDb {
         recreate: Boolean, false,
         autoRepair: Boolean, false,
         forceFileClosing: Boolean, false,
-        lazyOpen: Boolean, false,
     }
     */
     async openAll(query = {}) {

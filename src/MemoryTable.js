@@ -22,7 +22,6 @@ class MemoryTable extends BasicTable {
         if (!query.toTableInstance)
             throw new Error(`'query.toTableInstance' parameter is required`);
 
-        await this.openingLock.wait();
         this._checkErrors();
 
         await this.lock.get();

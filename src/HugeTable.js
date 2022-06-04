@@ -18,7 +18,6 @@ class HugeTable {
         this.autoIncrement = 0;
         this.fileError = '';
 
-        this.openingLock = new LockQueue(100);
         this.lock = new LockQueue(100);
 
         this.opened = false;
@@ -45,7 +44,7 @@ class HugeTable {
 
     async _loadBlockList() {
     }
-    
+
     async open(query = {}) {
         if (this.opening)
             throw new Error('Table open in progress');
