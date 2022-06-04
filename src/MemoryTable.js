@@ -1,3 +1,5 @@
+'use strict';
+
 const BasicTable = require('./BasicTable');
 
 class MemoryTable extends BasicTable {

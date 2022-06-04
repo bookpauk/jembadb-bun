@@ -55,6 +55,7 @@ class JembaDb {
             type: 'basic' | 'memory' | 'huge', default 'basic'
             cacheSize: Number, 5
             blockSize: Number, 1000000, for huge table only
+            blockCache: Number, 1, for huge table only
             compressed: Number, {0..9}, 0
             recreate: Boolean, false,
             autoRepair: Boolean, false,
@@ -147,6 +148,7 @@ class JembaDb {
         type: 'basic' | 'memory' | 'huge', default 'basic'
         cacheSize: Number, 5
         blockSize: Number, 1000000, for huge table only
+        blockCache: Number, 1, for huge table only
         compressed: Number, {0..9}, 0
         recreate: Boolean, false,
         autoRepair: Boolean, false,
@@ -393,6 +395,7 @@ class JembaDb {
         type: 'basic' | 'memory' | 'huge', default 'basic'
         cacheSize: Number, 5
         blockSize: Number, 1000000, for huge table only
+        blockCache: Number, 1, for huge table only
         compressed: Number, {0..9}, 0
         recreate: Boolean, false,
         autoRepair: Boolean, false,
@@ -458,6 +461,7 @@ class JembaDb {
         type: 'basic' | 'memory' | 'huge', default 'basic'
         cacheSize: Number, 5
         blockSize: Number, 1000000, for huge table only
+        blockCache: Number, 1, for huge table only        
         compressed: Number, {0..9}, 0
         recreate: Boolean, false,
         autoRepair: Boolean, false,

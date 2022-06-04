@@ -1,5 +1,8 @@
 'use strict';
-
+/*
+    Limitations:
+    - maximum rec count is ~16000000 (limitation of JS Map)
+*/
 const fs = require('fs').promises;
 const utils = require('./utils');
 
