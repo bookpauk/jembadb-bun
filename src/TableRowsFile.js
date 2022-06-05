@@ -373,7 +373,7 @@ class TableRowsFile {
                 if (!block || !block.final)
                     continue;
 
-                if ( (block.delCount > 0 && block.addCount - block.delCount < block.rowsLength*0.7)
+                if ( (block.delCount > 0 && block.addCount - block.delCount < block.rowsLength*0.6)
                     || block.size < maxBlockSize/2
                     ) {
                     this.defragCandidates.push(block);
