@@ -8,8 +8,6 @@ const maxBlockSize = 1024*1024;//bytes
 
 const minFileDumpSize = 100*1024;//bytes
 const maxFileDumpSize = 50*1024*1024;//bytes
-const defragAfter = 10;
-const defragBlockCountAtOnce = 1;
 
 class TableRowsFile {
     constructor(tablePath, cacheSize, compressed) {
@@ -22,12 +20,11 @@ class TableRowsFile {
         this.currentBlockIndex = 0;
         this.lastSavedBlockIndex = 0;
         this.blockList = new Map();
+        this.blockSetDefrag = new Set();
         this.blocksNotFinalized = new Map();//indexes of blocks
         this.loadedBlocks = [];
         this.deltas = new Map();
 
-        this.defragCounter = 0;
-        this.defragTriggerCoeff = 0.5;
         this.destroyed = false;
 
         this.blockindex0Size = 0;
@@ -76,6 +73,7 @@ class TableRowsFile {
             const block = this.blockList.get(this.blockIndex.get(id));
             if (block) {
                 block.delCount++;
+                this.blockSetDefrag.add(block.index);
                 delta.blockList.push([block.index, 1]);
             }
 
@@ -324,6 +322,7 @@ class TableRowsFile {
             }
 
             this.blocksNotFinalized.delete(index);
+            this.blockSetDefrag.add(index);
         }
     }
 
@@ -364,41 +363,28 @@ class TableRowsFile {
             this.lastSavedBlockIndex = delta.blockRows[len - 1][0];
         }
 
-        //check all blocks fragmentation
+        //check all blocks fragmentation & defragment if needed
         if (!this.defragCandidates)
             this.defragCandidates = [];
 
-        if (!this.defragCandidates.length) {
-            if (this.defragCounter >= defragAfter) {
-                for (const block of this.blockList.values()) {
-                    if (!block.final)
-                        continue;
+        if (!this.defragCandidates.length && this.blockSetDefrag.size) {
+            for (const index of this.blockSetDefrag) {
+                const block = this.blockList.get(index);
+                if (!block || !block.final)
+                    continue;
 
-                    if ( (block.delCount > 0 && block.addCount - block.delCount < block.rowsLength*this.defragTriggerCoeff)
-                        || block.size < maxBlockSize/2
-                        ) {
-                        this.defragCandidates.push(block);
-                    }
+                if ( (block.delCount > 0 && block.addCount - block.delCount < block.rowsLength*0.7)
+                    || block.size < maxBlockSize/2
+                    ) {
+                    this.defragCandidates.push(block);
                 }
-
-                if (!this.defragCandidates.length) {
-                    this.defragTriggerCoeff += 0.1;
-                    this.defragTriggerCoeff = (this.defragTriggerCoeff > 1 ? 1 : this.defragTriggerCoeff);
-                } else {
-                    if (this.defragTriggerCoeff > 0.65)
-                        this.defragCandidates = this.defragCandidates.slice(0, 2);
-                    this.defragTriggerCoeff = 0.5;
-                }
-
-                this.defragCounter = 0;
-            } else {
-                this.defragCounter++;
             }
+
+            this.blockSetDefrag = new Set();
         }
 
-        let defragmented = 0;
         while (this.defragCandidates.length) {
-            if (defragmented >= defragBlockCountAtOnce || this.destroyed)
+            if (this.destroyed)
                 break;
 
             const block = this.defragCandidates.shift();
@@ -423,7 +409,6 @@ class TableRowsFile {
                 delta.delFiles = [];
             delta.delFiles.push(this.blockRowsFilePath(block.index));
 
-            defragmented++;
 //console.log(`defragmented block ${block.index}, size: ${block.size}, addCount: ${block.addCount}, delCount: ${block.delCount}, rowsLength: ${block.rowsLength}`);
         }
 
@@ -582,6 +567,7 @@ class TableRowsFile {
 
         this.blocksNotFinalized = new Map();
         for (const block of this.blockList.values()) {
+            this.blockSetDefrag.add(block.index);
             if (!block.final)
                 this.blocksNotFinalized.set(block.index, 1);
         }
