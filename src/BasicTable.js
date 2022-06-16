@@ -321,29 +321,34 @@ class BasicTable {
         this.opened = false;
         this.closed = true;
 
-        if (!this.inMemory) {
-            while (this.savingChanges) {
-                await utils.sleep(10);
+        await this.lock.get();
+        try {
+            if (!this.inMemory) {
+                while (this.savingChanges) {
+                    await utils.sleep(10);
+                }
             }
-        }
 
-        if (this.fileError) {
-            try {
-                await this._saveState('0');
-            } catch(e) {
-                //
+            if (this.fileError) {
+                try {
+                    await this._saveState('0');
+                } catch(e) {
+                    //
+                }
             }
+
+            //for GC
+            if (this.reducer)
+                await this.reducer._destroy();
+            this.reducer = null;
+
+            if (this.rowsInterface)
+                await this.rowsInterface.destroy();
+            this.rowsInterface = null;
+            this.tableRowsFile = null;
+        } finally {
+            this.lock.ret();
         }
-
-        //for GC
-        if (this.reducer)
-            await this.reducer._destroy();
-        this.reducer = null;
-
-        if (this.rowsInterface)
-            await this.rowsInterface.destroy();
-        this.rowsInterface = null;
-        this.tableRowsFile = null;
     }
 
     /*

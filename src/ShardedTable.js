@@ -14,6 +14,9 @@ const LockQueue = require('./LockQueue');
 
 const BasicTable = require('./BasicTable');
 
+const shardCountStep = 20*1000*1000;//must be greater than 16M
+const maxFreeShardNumsLength = 10;
+
 class ShardedTable {
     constructor() {
         this.type = 'sharded';
@@ -23,12 +26,22 @@ class ShardedTable {
 
         this.lock = new LockQueue(100);
 
-        this.meta = null; //basic table
-        this.shards = null;//basic table
+        this.metaTable = null; //basic table
+        this.infoShard = {shard: '', count: 0};
 
-        this.metaShard = {shard: '', count: 0};
+        /*
+        {
+            shard: String,
+            num: Number,
+            count: Number,
+        }
+        */
         this.shardList = new Map();
-        this.openedShards = new Map();//basic tables
+        this.shardListTable = null;//basic table
+
+        this.openedShardTables = new Map();//basic tables
+        this.openedShardNames = new Set();
+        this.freeShardNums = [];
 
         this.opened = false;
         this.closed = false;
@@ -56,24 +69,98 @@ class ShardedTable {
     }
 
     async _loadMeta() {
-        this.meta = new BasicTable();
-        await this.meta.open({tablePath: `${this.tablePath}/meta`});
+        this.metaTable = new BasicTable();
+        await this.metaTable.open({tablePath: `${this.tablePath}/meta`});
 
-        this.shards = new BasicTable();
-        await this.shards.open({tablePath: `${this.tablePath}/shards`});
-        await this.shards.create({
+        this.shardListTable = new BasicTable();
+        await this.shardListTable.open({tablePath: `${this.tablePath}/shards`});
+        await this.shardListTable.create({
             quietIfExists: true,
             hash: {field: 'shard', depth: 100, unique: true},
         });
 
-        const rows = await this.shards.select({});//all
+        const rows = await this.shardListTable.select({});//all
         for (const row of rows) {
             if (row.shard !== '') {                
                 this.shardList.set(row.shard, row);
             } else {
-                this.metaShard = row;
+                this.infoShard = row;
             }
         }
+    }
+
+    async _saveShardRec(shardRec) {
+        await this.shardListTable.delete({where: `@@hash('shard', ${utils.esc(shardRec.shard)})`});
+        await this.shardListTable.insert({rows: [shardRec]});
+    }
+
+    _shardTablePath(num) {
+        if (num < 1000000)
+            return `${this.tablePath}/s${num.toString().padStart(6, '0')}`;
+        else
+            return `${this.tablePath}/s${num.toString().padStart(12, '0')}`;
+    }
+
+    _getFreeShardNum() {
+        if (!this.freeShardNums.length) {
+            this.freeShardNums = [];
+            const nums = new Set();
+            for (const shardRec of this.shardList.values()) {
+                nums.add(shardRec.num);
+            }
+
+            let i = 0;
+            while (this.freeShardNums.length < maxFreeShardNumsLength) {
+                if (!nums.has(i))
+                    this.freeShardNums.push(i);
+                i++;
+            }
+        }
+
+        return this.freeShardNums.shift();
+    }
+
+    async _closeShards(closeAll = false) {
+        const maxSize = (closeAll ? 0 : this.cacheShards);
+        while (this.openedShardTables.size > maxSize) {
+            for (const [shard, table] of this.openedShardTables) {
+                await table.close();
+                this.openedShardTables.delete(shard);
+                this.openedShardNames.delete(shard);
+                break;
+            }
+        }
+    }    
+
+    async _openShard(shard) {
+        if (this.openedShardNames.has(shard))
+            return;
+
+        let shardRec = this.shardList.get(shard);
+        let isNew = !shardRec;
+        if (isNew) {
+            shardRec = {
+                shard,
+                num: this._getFreeShardNum(),
+                count: 0,
+            };
+
+            await this._saveShardRec(shardRec);
+            this.shardList.set(shardRec.shard, shardRec);
+        }
+
+        const newTable = new BasicTable();
+
+        const query = utils.cloneDeep(this.openQuery);
+        query.tablePath = this._shardTablePath(shardRec.num);
+        await newTable.open(query);
+        if (isNew)
+            newTable.autoIncrement = shardCountStep*shardRec.num;
+
+        this.openedShardTables.set(shardRec.shard, newTable);
+        this.openedShardNames.add(shardRec.shard);
+
+        await this._closeShards();
     }
 
     /*
@@ -182,12 +269,21 @@ class ShardedTable {
         this.opened = false;
         this.closed = true;
 
-        if (this.fileError) {
-            try {
-                await this._saveState('0');
-            } catch(e) {
-                //
+        await this.lock.get();
+        try {
+            await this.metaTable.close();
+            await this.shardListTable.close();
+            await this._closeShards(true);
+
+            if (this.fileError) {
+                try {
+                    await this._saveState('0');
+                } catch(e) {
+                    //
+                }
             }
+        } finally {
+            this.lock.ret();
         }
     }
 
@@ -218,7 +314,7 @@ class ShardedTable {
     */
     async create(query) {
         this._checkUniqueMeta(query);
-        return await this.meta.create(query);
+        return await this.metaTable.create(query);
     }
 
     /*
@@ -230,7 +326,7 @@ class ShardedTable {
     result = {}
     */
     async drop(query) {
-        return await this.meta.drop(query);
+        return await this.metaTable.drop(query);
     }
 
     /*
@@ -242,7 +338,7 @@ class ShardedTable {
     }
     */
     async getMeta() {
-        return await this.meta.getMeta();
+        return await this.metaTable.getMeta();
     }
 
     /*
@@ -280,6 +376,7 @@ class ShardedTable {
                 throw new Error('query.rows must be an array');
             }
 
+            //const shards = 
             for (const row of query.rows) {
                 if (utils.hasProp(row, 'id'))
                     throw new Error(`row.id (${row.id}) use is not allowed for this table type (${this.type}) while insert`);
@@ -289,7 +386,10 @@ class ShardedTable {
                     throw new Error(`Wrong row.shard field value: '${row.shard}' for row.id: ${row.id}`);
             }
 
+
+
             const result = {inserted: 0, replaced: 0};
+
 
             return result;
         } finally {
