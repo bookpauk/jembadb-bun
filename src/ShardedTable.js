@@ -1,12 +1,12 @@
 'use strict';
 /*
-    Maximum rec count is unlimited.
+    Total maximum rec count is unlimited.
 
     Limitations:
     - no rec.id while insert
     - rec.shard field required while insert    
     - no unique hashes and indexes
-    - maximum shard rec count is ~16000000 (limitation of JS Map)
+    - maximum rec count for one shard is ~16000000 (limitation of JS Map)
 */
 const fs = require('fs').promises;
 const utils = require('./utils');
@@ -15,7 +15,7 @@ const LockQueue = require('./LockQueue');
 const BasicTable = require('./BasicTable');
 
 const shardCountStep = 20*1000*1000;//must be greater than 16M
-const maxFreeShardNumsLength = 10;
+const maxFreeShardNumsLength = 100;
 
 class ShardedTable {
     constructor() {
@@ -335,10 +335,18 @@ class ShardedTable {
         flag:  Array, [{name: 'flag1', check: '(r) => r.id > 10'}, ...]
         hash:  Array, [{field: 'field1', type: 'string', depth: 11, allowUndef: false}, ...]
         index: Array, [{field: 'field1', type: 'string', depth: 11, allowUndef: false}, ...]
+        shards: [{shard: 'string', num: 1, count: 10}, ...]
     }
     */
     async getMeta() {
-        return await this.metaTable.getMeta();
+        const result = await this.metaTable.getMeta();
+        result.type = this.type;
+        result.shards = Array.from(this.shardList.values()).map(
+            (r) => ({shard: r.shard, num: r.num, count: r.count})
+        );
+        result.count = this.infoShard.count;
+
+        return result;
     }
 
     /*
@@ -382,9 +390,9 @@ class ShardedTable {
                 if (utils.hasProp(row, 'id'))
                     throw new Error(`row.id (${row.id}) use is not allowed for this table type (${this.type}) while insert`);
                 if (!utils.hasProp(row, 'shard'))
-                    throw new Error(`No row.shard field found for row.id: ${row.id}`);
+                    throw new Error(`No row.shard field found for row: ${JSON.stringify(row)}`);
                 if (row.shard === '' || typeof(row.shard) !== 'string') 
-                    throw new Error(`Wrong row.shard field value: '${row.shard}' for row.id: ${row.id}`);
+                    throw new Error(`Wrong row.shard field value: '${row.shard}' for row: ${JSON.stringify(row)}`);
 
                 let r = shardedRows.get(row.shard);
                 if (!r) {
@@ -404,8 +412,16 @@ class ShardedTable {
                     //insert
                     const rows = shardedRows.get(shard);
                     const table = this.openedShardTables.get(shard);
+
                     const insResult = await table.insert({rows});
                     result.inserted += insResult.inserted;
+
+                    const shardRec = this.shardList.get(shard);
+                    this.infoShard.count -= shardRec.count;
+                    shardRec.count = table.rowsInterface.getAllIdsSize();
+                    this.infoShard.count += shardRec.count;
+                    await this._saveShardRec(shardRec);
+                    await this._saveShardRec(this.infoShard);
 
                     //update shardedRows
                     shardedRows.delete(shard);
@@ -415,10 +431,17 @@ class ShardedTable {
             //second step - open & insert to other shard tables
             for (const [shard, rows] of shardedRows) {
                 await this._openShard(shard);
-                
+
                 const table = this.openedShardTables.get(shard);
                 const insResult = await table.insert({rows});
                 result.inserted += insResult.inserted;
+
+                const shardRec = this.shardList.get(shard);
+                this.infoShard.count -= shardRec.count;
+                shardRec.count = table.rowsInterface.getAllIdsSize();
+                this.infoShard.count += shardRec.count;
+                await this._saveShardRec(shardRec);
+                await this._saveShardRec(this.infoShard);
             }
 
             return result;
