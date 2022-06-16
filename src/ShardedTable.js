@@ -376,7 +376,8 @@ class ShardedTable {
                 throw new Error('query.rows must be an array');
             }
 
-            //const shards = 
+            //checks & shardedRows
+            const shardedRows = new Map();
             for (const row of query.rows) {
                 if (utils.hasProp(row, 'id'))
                     throw new Error(`row.id (${row.id}) use is not allowed for this table type (${this.type}) while insert`);
@@ -384,16 +385,44 @@ class ShardedTable {
                     throw new Error(`No row.shard field found for row.id: ${row.id}`);
                 if (row.shard === '' || typeof(row.shard) !== 'string') 
                     throw new Error(`Wrong row.shard field value: '${row.shard}' for row.id: ${row.id}`);
+
+                let r = shardedRows.get(row.shard);
+                if (!r) {
+                    r = [];
+                    shardedRows.set(row.shard, r);
+                }
+                r.push(row);
             }
-
-
 
             const result = {inserted: 0, replaced: 0};
 
+            //first step - insert to already opened shard tables
+            const shardedRowsSet = new Set(shardedRows.keys());
+            const shortSet = (shardedRowsSet.size < this.openedShardNames.size ? shardedRowsSet : this.openedShardNames);
+            for (const shard of shortSet) {
+                if (shardedRowsSet.has(shard) && this.openedShardNames.has(shard)) {
+                    //insert
+                    const rows = shardedRows.get(shard);
+                    const table = this.openedShardTables.get(shard);
+                    const insResult = await table.insert({rows});
+                    result.inserted += insResult.inserted;
+
+                    //update shardedRows
+                    shardedRows.delete(shard);
+                }
+            }
+
+            //second step - open & insert to other shard tables
+            for (const [shard, rows] of shardedRows) {
+                await this._openShard(shard);
+                
+                const table = this.openedShardTables.get(shard);
+                const insResult = await table.insert({rows});
+                result.inserted += insResult.inserted;
+            }
 
             return result;
         } finally {
-            this._saveChanges();//no await
             this.lock.ret();
         }
     }
