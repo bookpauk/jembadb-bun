@@ -4,27 +4,40 @@
 
     Limitations:
     - no rec.id while insert
-    - no unique hashes and indexes    
+    - rec.shard field required while insert    
+    - no unique hashes and indexes
+    - maximum shard rec count is ~16000000 (limitation of JS Map)
 */
 const fs = require('fs').promises;
+const utils = require('./utils');
 const LockQueue = require('./LockQueue');
 
 const BasicTable = require('./BasicTable');
 
-class HugeTable {
+class ShardedTable {
     constructor() {
-        this.type = 'huge';
+        this.type = 'sharded';
 
         this.autoIncrement = 0;
         this.fileError = '';
 
         this.lock = new LockQueue(100);
 
+        this.meta = null; //basic table
+        this.shards = null;//basic table
+
+        this.metaShard = {shard: '', count: 0};
+        this.shardList = new Map();
+        this.openedShards = new Map();//basic tables
+
         this.opened = false;
         this.closed = false;
 
         //table open query
         this.openQuery = {};
+
+        //table options defaults
+        this.cacheShards = 1;
     }
 
     _checkErrors() {
@@ -42,15 +55,44 @@ class HugeTable {
         //TODO
     }
 
-    async _loadBlockList() {
+    async _loadMeta() {
+        this.meta = new BasicTable();
+        await this.meta.open({tablePath: `${this.tablePath}/meta`});
+
+        this.shards = new BasicTable();
+        await this.shards.open({tablePath: `${this.tablePath}/shards`});
+        await this.shards.create({
+            quietIfExists: true,
+            hash: {field: 'shard', depth: 100, unique: true},
+        });
+
+        const rows = await this.shards.select({});//all
+        for (const row of rows) {
+            if (row.shard !== '') {                
+                this.shardList.set(row.shard, row);
+            } else {
+                this.metaShard = row;
+            }
+        }
     }
 
+    /*
+    query: {
+        tablePath: String,
+        cacheSize: Number,
+        cacheShards: Number, 1, for sharded table only
+        compressed: Number, 0..9
+        recreate: Boolean, false,
+        autoRepair: Boolean, false,
+        forceFileClosing: Boolean, false,
+        typeCompatMode: Boolean, false,
+    }
+    */
     async open(query = {}) {
         if (this.opening)
             throw new Error('Table open in progress');
 
         this.opening = true;
-        await this.openingLock.get();
         //console.log(query);
         try {
             if (this.opened)
@@ -63,6 +105,8 @@ class HugeTable {
                 throw new Error(`'query.tablePath' parameter is required`);
 
             this.tablePath = query.tablePath;
+            this.cacheShards = query.cacheShards || 1;
+
             this.openQuery = query;            
 
             let create = true;
@@ -107,7 +151,7 @@ class HugeTable {
             //load
             try {
                 if (state === '1') {
-                    await this._loadBlockList();
+                    await this._loadMeta();
                 } else {
                     throw new Error('Table corrupted')
                 }
@@ -119,7 +163,7 @@ class HugeTable {
                     throw e;
                 }
 
-                await this._loadBlockList();
+                await this._loadMeta();
             }
 
             this.opened = true;
@@ -127,7 +171,6 @@ class HugeTable {
             await this.close();
             throw new Error(`Open table (${query.tablePath}): ${e.message}`);
         } finally {
-            this.openingLock.free();
             this.opening = false;
         }
     }
@@ -148,6 +191,22 @@ class HugeTable {
         }
     }
 
+    _checkUniqueMeta(query) {
+        if (query.hash) {
+            for (const hash of utils.paramToArray(query.hash)) {
+                if (hash.unique)
+                    throw new Error(`Unique hashes are forbidden for this table type (${this.type})`);
+            }
+        }
+
+        if (query.index) {
+            for (const index of utils.paramToArray(query.index)) {
+                if (index.unique)
+                    throw new Error(`Unique indexes are forbidden for this table type (${this.type})`);
+            }
+        }
+    }
+
     /*
     query = {
         quietIfExists: Boolean,
@@ -158,6 +217,8 @@ class HugeTable {
     result = {}
     */
     async create(query) {
+        this._checkUniqueMeta(query);
+        return await this.meta.create(query);
     }
 
     /*
@@ -169,6 +230,7 @@ class HugeTable {
     result = {}
     */
     async drop(query) {
+        return await this.meta.drop(query);
     }
 
     /*
@@ -180,6 +242,7 @@ class HugeTable {
     }
     */
     async getMeta() {
+        return await this.meta.getMeta();
     }
 
     /*
@@ -205,10 +268,34 @@ class HugeTable {
     }
     result = {
     (!) inserted: Number,
-    (!) replaced: Number,
+    (!) replaced: Number,//always 0
     }
     */
     async insert(query = {}) {
+        this._checkErrors();
+
+        await this.lock.get();
+        try {
+            if (!Array.isArray(query.rows)) {
+                throw new Error('query.rows must be an array');
+            }
+
+            for (const row of query.rows) {
+                if (utils.hasProp(row, 'id'))
+                    throw new Error(`row.id (${row.id}) use is not allowed for this table type (${this.type}) while insert`);
+                if (!utils.hasProp(row, 'shard'))
+                    throw new Error(`No row.shard field found for row.id: ${row.id}`);
+                if (row.shard === '' || typeof(row.shard) !== 'string') 
+                    throw new Error(`Wrong row.shard field value: '${row.shard}' for row.id: ${row.id}`);
+            }
+
+            const result = {inserted: 0, replaced: 0};
+
+            return result;
+        } finally {
+            this._saveChanges();//no await
+            this.lock.ret();
+        }
     }
 
     /*
@@ -258,7 +345,12 @@ class HugeTable {
     result = {}
     */
     async clone(query = {}) {
-    }    
+    }
+
+    async _saveState(state) {
+        await fs.writeFile(`${this.tablePath}/state`, state);
+    }
+
 }
 
-module.exports = HugeTable;
+module.exports = ShardedTable;
