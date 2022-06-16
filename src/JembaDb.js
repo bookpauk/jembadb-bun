@@ -52,10 +52,9 @@ class JembaDb {
 
         //table open defaults
         tableDefaults: {
-            type: 'basic' | 'memory' | 'huge', default 'basic'
+            type: 'basic' | 'memory' | 'sharded', default 'basic'
             cacheSize: Number, 5
-            blockSize: Number, 1000000, for huge table only
-            blockCache: Number, 1, for huge table only
+            cacheShards: Number, 1, for sharded table only
             compressed: Number, {0..9}, 0
             recreate: Boolean, false,
             autoRepair: Boolean, false,
@@ -144,10 +143,9 @@ class JembaDb {
         quietIfExists: Boolean,
         asSelect: Object, select query,
 
-        type: 'basic' | 'memory' | 'huge', default 'basic'
+        type: 'basic' | 'memory' | 'sharded', default 'basic'
         cacheSize: Number, 5
-        blockSize: Number, 1000000, for huge table only
-        blockCache: Number, 1, for huge table only
+        cacheShards: Number, 1, for sharded table only
         compressed: Number, {0..9}, 0
         recreate: Boolean, false,
         autoRepair: Boolean, false,
@@ -391,10 +389,9 @@ class JembaDb {
     (!) table: 'tableName',
         create: Boolean, false,
 
-        type: 'basic' | 'memory' | 'huge', default 'basic'
+        type: 'basic' | 'memory' | 'sharded', default 'basic'
         cacheSize: Number, 5
-        blockSize: Number, 1000000, for huge table only
-        blockCache: Number, 1, for huge table only
+        cacheShards: Number, 1, for sharded table only
         compressed: Number, {0..9}, 0
         recreate: Boolean, false,
         autoRepair: Boolean, false,
@@ -456,10 +453,9 @@ class JembaDb {
 
     /*
     query = {
-        type: 'basic' | 'memory' | 'huge', default 'basic'
+        type: 'basic' | 'memory' | 'sharded', default 'basic'
         cacheSize: Number, 5
-        blockSize: Number, 1000000, for huge table only
-        blockCache: Number, 1, for huge table only        
+        cacheShards: Number, 1, for sharded table only
         compressed: Number, {0..9}, 0
         recreate: Boolean, false,
         autoRepair: Boolean, false,
