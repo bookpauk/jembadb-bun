@@ -320,11 +320,31 @@ class ShardedTable {
     result = {}
     */
     async create(query) {
-        this._checkUniqueMeta(query);
-        const result = await this.metaTable.create(query);
-        this.changedTables.push(this.metaTable);
-        this._checkTables(); //no await
-        return result;
+        this._checkErrors();
+
+        await this.lock.get();
+        try {
+            this._checkUniqueMeta(query);
+
+            for (const shard of this.shardList.keys()) {
+                await this._openShard(shard);
+                const table = this.openedShardTables.get(shard);
+
+                await table.create(query);
+
+                this.changedTables.push(table);
+                this._checkTables(); //no await
+            }
+
+            const result = await this.metaTable.create(query);
+            
+            this.changedTables.push(this.metaTable);
+            this._checkTables(); //no await
+
+            return result;
+        } finally {
+            this.lock.ret();
+        }
     }
 
     /*
@@ -336,10 +356,29 @@ class ShardedTable {
     result = {}
     */
     async drop(query) {
-        const result = await this.metaTable.drop(query);
-        this.changedTables.push(this.metaTable);
-        this._checkTables(); //no await
-        return result;
+        this._checkErrors();
+
+        await this.lock.get();
+        try {
+            for (const shard of this.shardList.keys()) {
+                await this._openShard(shard);
+                const table = this.openedShardTables.get(shard);
+
+                await table.drop(query);
+
+                this.changedTables.push(table);
+                this._checkTables(); //no await
+            }
+
+            const result = await this.metaTable.drop(query);
+
+            this.changedTables.push(this.metaTable);
+            this._checkTables(); //no await
+
+            return result;
+        } finally {
+            this.lock.ret();
+        }
     }
 
     /*
