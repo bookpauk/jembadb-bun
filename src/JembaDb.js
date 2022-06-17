@@ -55,6 +55,7 @@ class JembaDb {
             type: 'basic' | 'memory' | 'sharded', default 'basic'
             cacheSize: Number, 5
             cacheShards: Number, 1, for sharded table only
+            autoShardSize: Number, 1000000, for sharded table only
             compressed: Number, {0..9}, 0
             recreate: Boolean, false,
             autoRepair: Boolean, false,
@@ -146,6 +147,7 @@ class JembaDb {
         type: 'basic' | 'memory' | 'sharded', default 'basic'
         cacheSize: Number, 5
         cacheShards: Number, 1, for sharded table only
+        autoShardSize: Number, 1000000, for sharded table only
         compressed: Number, {0..9}, 0
         recreate: Boolean, false,
         autoRepair: Boolean, false,
@@ -392,6 +394,7 @@ class JembaDb {
         type: 'basic' | 'memory' | 'sharded', default 'basic'
         cacheSize: Number, 5
         cacheShards: Number, 1, for sharded table only
+        autoShardSize: Number, 1000000, for sharded table only
         compressed: Number, {0..9}, 0
         recreate: Boolean, false,
         autoRepair: Boolean, false,
@@ -456,6 +459,7 @@ class JembaDb {
         type: 'basic' | 'memory' | 'sharded', default 'basic'
         cacheSize: Number, 5
         cacheShards: Number, 1, for sharded table only
+        autoShardSize: Number, 1000000, for sharded table only
         compressed: Number, {0..9}, 0
         recreate: Boolean, false,
         autoRepair: Boolean, false,
@@ -684,6 +688,7 @@ class JembaDb {
     query = {
     (!) table: 'tableName',
         replace: Boolean,
+        shardGen: '(r) => r.date',//for sharded table only
     (!) rows: Array,
     }
     result = {

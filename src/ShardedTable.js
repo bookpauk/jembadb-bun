@@ -16,6 +16,8 @@ const BasicTable = require('./BasicTable');
 
 const shardCountStep = 20*1000*1000;//must be greater than 16M
 const maxFreeShardNumsLength = 100;
+const maxAutoShardListLength = 1000;
+const autoShardName = '___auto';
 
 class ShardedTable {
     constructor() {
@@ -43,6 +45,11 @@ class ShardedTable {
         this.openedShardNames = new Set();
         this.freeShardNums = [];
 
+        this.autoShard = {
+            step: 0,
+            list: [],//{shard: String, count: Number}
+        };
+
         this.opened = false;
         this.closed = false;
         this.changedTables = [];
@@ -52,6 +59,7 @@ class ShardedTable {
 
         //table options defaults
         this.cacheShards = 1;
+        this.autoShardSize = 1000000;
     }
 
     _checkErrors() {
@@ -97,6 +105,12 @@ class ShardedTable {
         this._checkTables(); //no await
     }
 
+    async _delShardRec(shardRec) {
+        await this.shardListTable.delete({where: `@@hash('shard', ${utils.esc(shardRec.shard)})`});
+        this.changedTables.push(this.shardListTable);
+        this._checkTables(); //no await
+    }
+
     _shardTablePath(num) {
         if (num < 1000000)
             return `${this.tablePath}/s${num.toString().padStart(6, '0')}`;
@@ -133,7 +147,32 @@ class ShardedTable {
                 break;
             }
         }
-    }    
+    }
+
+    async _delShards(shardArr) {
+        for (const shard of shardArr) {
+            if (this.openedShardNames.has(shard)) {
+                const table = this.openedShardTables.get(shard);
+
+                await table.close();
+
+                this.openedShardTables.delete(shard);
+                this.openedShardNames.delete(shard);
+            }
+
+            const shardRec = this.shardList.get(shard);
+            if (!shardRec)
+                throw new Error('Something wrong: trying to delete not existing shard');
+
+            if (shardRec.count)
+                throw new Error(`Something wrong: trying to delete not empty shard: ${JSON.stringify(shardRec)}`);
+
+            await this._delShardRec(shardRec);
+            this.shardList.delete(shard);
+
+            await fs.rmdir(this._shardTablePath(shardRec.num), { recursive: true });
+        }
+    }
 
     async _openShard(shard) {
         if (this.openedShardNames.has(shard))
@@ -195,7 +234,8 @@ class ShardedTable {
                 throw new Error(`'query.tablePath' parameter is required`);
 
             this.tablePath = query.tablePath;
-            this.cacheShards = query.cacheShards || 1;
+            this.cacheShards = query.cacheShards || this.cacheShards;
+            this.autoShardSize = query.autoShardSize || this.autoShardSize;
 
             this.openQuery = query;            
 
@@ -387,13 +427,13 @@ class ShardedTable {
         flag:  Array, [{name: 'flag1', check: '(r) => r.id > 10'}, ...]
         hash:  Array, [{field: 'field1', type: 'string', depth: 11, allowUndef: false}, ...]
         index: Array, [{field: 'field1', type: 'string', depth: 11, allowUndef: false}, ...]
-        shards: [{shard: 'string', num: 1, count: 10}, ...]
+        shardList: [{shard: 'string', num: 1, count: 10}, ...]
     }
     */
     async getMeta() {
         const result = await this.metaTable.getMeta();
         result.type = this.type;
-        result.shards = Array.from(this.shardList.values()).map(
+        result.shardList = Array.from(this.shardList.values()).map(
             (r) => ({shard: r.shard, num: r.num, count: r.count})
         );
         result.count = this.infoShard.count;
@@ -419,6 +459,62 @@ class ShardedTable {
         this._checkErrors();
 
 
+    }
+
+    _genAutoShard() {
+        const a = this.autoShard;
+        while (a.list.length) {
+            const last = a.list[a.list.length - 1];
+
+            last.count--;
+            if (last.count <= 0)
+                a.list.pop();
+
+            const shardRec = this.shardList.get(last.shard);
+            
+            if (!shardRec || shardRec.count < this.autoShardSize) {
+                return last.shard;//return generated shard
+            } else if (last.count > 0) {
+                a.list.pop();
+            }
+        }
+
+        //step 0 - check existing shards, opened shards to the end
+        if (a.step === 0 && !a.list.length) {
+            const opened = [];
+            for (const [shard, shardRec] of this.shardList) {
+                if (shardRec.count < this.autoShardSize) {
+
+                    const listRec = {shard, count: this.autoShardSize - shardRec.count};
+
+                    if (this.openedShardNames.has(shard)) {
+                        opened.push(listRec);
+                    } else {
+                        a.list.push(listRec);
+                    }
+                }
+            }
+
+            a.list = a.list.concat(opened);
+
+            a.step++;
+        }
+
+        //step 1 - generate new shard name, all existing are full
+        if (a.step === 1 && !a.list.length) {
+            const exists = new Set(this.shardList.keys());
+            let i = 0;
+            while (a.list.length < maxAutoShardListLength) {
+                i++;
+                const shard = `auto_${i}`;
+                if (!exists.has(shard))
+                    a.list.push({shard, count: this.autoShardSize});
+            }
+
+            a.list = a.list.reverse();
+        }
+
+        return this._genAutoShard();
     }
 
     /*
@@ -450,14 +546,20 @@ class ShardedTable {
             for (const row of rows) {
                 if (utils.hasProp(row, 'id'))
                     throw new Error(`row.id (${row.id}) use is not allowed for this table type (${this.type}) while insert`);
+
                 if (!utils.hasProp(row, 'shard')) {
                     if (shardGen)
                         row.shard = shardGen(row);
                     else
                         throw new Error(`No row.shard field found for row: ${JSON.stringify(row)}`);
                 }
+
                 if (row.shard === '' || typeof(row.shard) !== 'string') 
                     throw new Error(`Wrong row.shard field value: '${row.shard}' for row: ${JSON.stringify(row)}`);
+
+                //auto sharding
+                if (row.shard === autoShardName)
+                    row.shard = this._genAutoShard();
 
                 let r = shardedRows.get(row.shard);
                 if (!r) {
@@ -546,6 +648,8 @@ class ShardedTable {
     }
     */
     async delete(query = {}) {
+        //if deleted > 0
+        this.autoShard.step = 0;
     }        
 
     /*
