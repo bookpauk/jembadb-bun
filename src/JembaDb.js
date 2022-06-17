@@ -612,6 +612,7 @@ class JembaDb {
     /*
     query = {
     (!) table: 'tableName',
+        shards: ['shard1', 'shard2', ...] || '(s) => (s == 'shard1')', //for sharded table only
         count: Boolean,
         where: `@@index('field1', 10, 20)`,
         distinct: 'fieldName' || Array,

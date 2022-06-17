@@ -45,6 +45,7 @@ class ShardedTable {
 
         this.opened = false;
         this.closed = false;
+        this.changedTables = [];
 
         //table open query
         this.openQuery = {};
@@ -92,6 +93,8 @@ class ShardedTable {
     async _saveShardRec(shardRec) {
         await this.shardListTable.delete({where: `@@hash('shard', ${utils.esc(shardRec.shard)})`});
         await this.shardListTable.insert({rows: [shardRec]});
+        this.changedTables.push(this.shardListTable);
+        this._checkTables(); //no await
     }
 
     _shardTablePath(num) {
@@ -275,6 +278,10 @@ class ShardedTable {
             await this.shardListTable.close();
             await this._closeShards(true);
 
+            while (this.checkingTables) {
+                await utils.sleep(10);
+            }
+
             if (this.fileError) {
                 try {
                     await this._saveState('0');
@@ -314,7 +321,10 @@ class ShardedTable {
     */
     async create(query) {
         this._checkUniqueMeta(query);
-        return await this.metaTable.create(query);
+        const result = await this.metaTable.create(query);
+        this.changedTables.push(this.metaTable);
+        this._checkTables(); //no await
+        return result;
     }
 
     /*
@@ -326,7 +336,10 @@ class ShardedTable {
     result = {}
     */
     async drop(query) {
-        return await this.metaTable.drop(query);
+        const result = await this.metaTable.drop(query);
+        this.changedTables.push(this.metaTable);
+        this._checkTables(); //no await
+        return result;
     }
 
     /*
@@ -351,6 +364,7 @@ class ShardedTable {
 
     /*
     query = {
+        shards: ['shard1', 'shard2', ...] || '(s) => (s == 'shard1')',
         count: Boolean,
         where: `@@index('field1', 10, 20)`,
         distinct: 'fieldName' || Array,
@@ -363,6 +377,9 @@ class ShardedTable {
     result = Array
     */
     async select(query = {}) {
+        this._checkErrors();
+
+
     }
 
     /*
@@ -414,6 +431,7 @@ class ShardedTable {
                     const table = this.openedShardTables.get(shard);
 
                     const insResult = await table.insert({rows});
+                    this.changedTables.push(table);
                     result.inserted += insResult.inserted;
 
                     const shardRec = this.shardList.get(shard);
@@ -433,7 +451,9 @@ class ShardedTable {
                 await this._openShard(shard);
 
                 const table = this.openedShardTables.get(shard);
+
                 const insResult = await table.insert({rows});
+                this.changedTables.push(table);
                 result.inserted += insResult.inserted;
 
                 const shardRec = this.shardList.get(shard);
@@ -446,6 +466,7 @@ class ShardedTable {
 
             return result;
         } finally {
+            this._checkTables(); //no await
             this.lock.ret();
         }
     }
@@ -486,6 +507,10 @@ class ShardedTable {
     result = {}
     */
     async markCorrupted(query = {}) {
+        this.fileError = query.message || 'Table corrupted';
+        await this.close();
+
+        return {};
     }
 
     /*
@@ -501,6 +526,56 @@ class ShardedTable {
 
     async _saveState(state) {
         await fs.writeFile(`${this.tablePath}/state`, state);
+    }
+
+    async _checkTables() {
+        this.needCheckTables = true;
+        if (this.checkingTables)
+            return;
+
+        try {
+            this._checkErrors();
+        } catch(e) {
+            return;
+        }
+
+        this.checkingTables = true;
+        try {
+            await utils.sleep(0);
+
+            while (this.needCheckTables) {
+                this.needCheckTables = false;
+
+                while (this.changedTables.length) {
+
+                    const len = this.changedTables.length;
+                    let i = 0;
+                    while (i < len) {
+                        const table = this.changedTables[i];
+                        i++;
+
+                        while (table.savingChanges) {
+                            if (this.changedTables.indexOf(table, i) > 0)
+                                break;
+                            await utils.sleep(2);
+                        }
+
+                        if (table.fileError) {
+                            this.fileError = table.fileError;
+                            await this._saveState('0');
+                            return;
+                        }
+                    }
+
+                    this.changedTables = this.changedTables.slice(i);
+                }
+            }
+        } catch(e) {
+            console.error(e.message);
+            this.fileError = e.message;
+        } finally {
+            this.checkingTables = false;
+        }
     }
 
 }
