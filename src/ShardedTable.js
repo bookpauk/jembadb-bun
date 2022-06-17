@@ -384,7 +384,7 @@ class ShardedTable {
 
     /*
     query = {
-        replace: Boolean,
+        shardGen: '(r) => r.date',
     (!) rows: Array,
     }
     result = {
@@ -401,13 +401,22 @@ class ShardedTable {
                 throw new Error('query.rows must be an array');
             }
 
+            let shardGen = null;
+            if (query.shardGen)
+                shardGen = new Function(`'use strict'; return ${query.shardGen}`)();
+
+            const rows = utils.cloneDeep(query.rows);
             //checks & shardedRows
             const shardedRows = new Map();
-            for (const row of query.rows) {
+            for (const row of rows) {
                 if (utils.hasProp(row, 'id'))
                     throw new Error(`row.id (${row.id}) use is not allowed for this table type (${this.type}) while insert`);
-                if (!utils.hasProp(row, 'shard'))
-                    throw new Error(`No row.shard field found for row: ${JSON.stringify(row)}`);
+                if (!utils.hasProp(row, 'shard')) {
+                    if (shardGen)
+                        row.shard = shardGen(row);
+                    else
+                        throw new Error(`No row.shard field found for row: ${JSON.stringify(row)}`);
+                }
                 if (row.shard === '' || typeof(row.shard) !== 'string') 
                     throw new Error(`Wrong row.shard field value: '${row.shard}' for row: ${JSON.stringify(row)}`);
 
