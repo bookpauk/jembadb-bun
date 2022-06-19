@@ -29,11 +29,11 @@ class ShardedTable {
         this.lock = new LockQueue(100);
 
         this.metaTable = null; //basic table
-        this.infoShard = {shard: '', count: 0};
+        this.infoShard = {id: '', count: 0};
 
         /*
         {
-            shard: String,
+            id: String,//shard
             num: Number,
             count: Number,
         }
@@ -83,15 +83,11 @@ class ShardedTable {
 
         this.shardListTable = new BasicTable();
         await this.shardListTable.open({tablePath: `${this.tablePath}/shards`});
-        await this.shardListTable.create({
-            quietIfExists: true,
-            hash: {field: 'shard', depth: 100, unique: true},
-        });
 
         const rows = await this.shardListTable.select({});//all
         for (const row of rows) {
-            if (row.shard !== '') {                
-                this.shardList.set(row.shard, row);
+            if (row.id !== '') {
+                this.shardList.set(row.id, row);
             } else {
                 this.infoShard = row;
             }
@@ -99,14 +95,13 @@ class ShardedTable {
     }
 
     async _saveShardRec(shardRec) {
-        await this.shardListTable.delete({where: `@@hash('shard', ${utils.esc(shardRec.shard)})`});
-        await this.shardListTable.insert({rows: [shardRec]});
+        await this.shardListTable.insert({rows: [shardRec], replace: true});
         this.changedTables.push(this.shardListTable);
         this._checkTables(); //no await
     }
 
     async _delShardRec(shardRec) {
-        await this.shardListTable.delete({where: `@@hash('shard', ${utils.esc(shardRec.shard)})`});
+        await this.shardListTable.delete({where: `@@id(${utils.esc(shardRec.id)})`});
         this.changedTables.push(this.shardListTable);
         this._checkTables(); //no await
     }
@@ -182,13 +177,13 @@ class ShardedTable {
         let isNew = !shardRec;
         if (isNew) {
             shardRec = {
-                shard,
+                id: shard,
                 num: this._getFreeShardNum(),
                 count: 0,
             };
 
             await this._saveShardRec(shardRec);
-            this.shardList.set(shardRec.shard, shardRec);
+            this.shardList.set(shard, shardRec);
         }
 
         const newTable = new BasicTable();
@@ -199,8 +194,8 @@ class ShardedTable {
         if (isNew)
             newTable.autoIncrement = shardCountStep*shardRec.num;
 
-        this.openedShardTables.set(shardRec.shard, newTable);
-        this.openedShardNames.add(shardRec.shard);
+        this.openedShardTables.set(shard, newTable);
+        this.openedShardNames.add(shard);
 
         await this._closeShards();
     }
@@ -434,7 +429,7 @@ class ShardedTable {
         const result = await this.metaTable.getMeta();
         result.type = this.type;
         result.shardList = Array.from(this.shardList.values()).map(
-            (r) => ({shard: r.shard, num: r.num, count: r.count})
+            (r) => ({shard: r.id, num: r.num, count: r.count})
         );
         result.count = this.infoShard.count;
 
