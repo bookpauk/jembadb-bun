@@ -7,6 +7,7 @@
     - rec.shard field required while insert    
     - no unique hashes and indexes
     - maximum rec count for one shard is ~16000000 (limitation of JS Map)
+    - possible unexpected behavior for select with limit,offset params
 */
 const fs = require('fs').promises;
 const utils = require('./utils');
@@ -39,6 +40,7 @@ class ShardedTable {
         }
         */
         this.shardList = new Map();
+        this.persShard = new Set(); //persistent shards
         this.shardListTable = null;//basic table
 
         this.openedShardTables = new Map();//basic tables
@@ -133,13 +135,29 @@ class ShardedTable {
     }
 
     async _closeShards(closeAll = false) {
-        const maxSize = (closeAll ? 0 : this.cacheShards);
-        while (this.openedShardTables.size > maxSize) {
+        if (closeAll) {
             for (const [shard, table] of this.openedShardTables) {
                 await table.close();
                 this.openedShardTables.delete(shard);
                 this.openedShardNames.delete(shard);
-                break;
+            }
+        } else {
+            let closableCount = this.openedShardTables.size - this.persShard.size;
+
+            if (closableCount <= this.cacheShards)
+                return;
+
+            for (const [shard, table] of this.openedShardTables) {
+                if (!this.persShard.has(shard)) {
+                    if (closableCount > this.cacheShards) {
+                        await table.close();
+                        this.openedShardTables.delete(shard);
+                        this.openedShardNames.delete(shard);
+                        closableCount--;
+                    } else {
+                        break;
+                    }
+                }
             }
         }
     }
@@ -422,14 +440,14 @@ class ShardedTable {
         flag:  Array, [{name: 'flag1', check: '(r) => r.id > 10'}, ...]
         hash:  Array, [{field: 'field1', type: 'string', depth: 11, allowUndef: false}, ...]
         index: Array, [{field: 'field1', type: 'string', depth: 11, allowUndef: false}, ...]
-        shardList: [{shard: 'string', num: 1, count: 10}, ...]
+        shardList: [{shard: 'string', num: 1, persistent: false, count: 10}, ...]
     }
     */
     async getMeta() {
         const result = await this.metaTable.getMeta();
         result.type = this.type;
         result.shardList = Array.from(this.shardList.values()).map(
-            (r) => ({shard: r.id, num: r.num, count: r.count})
+            (r) => ({shard: r.id, num: r.num, persistent: this.persShard.has(r.id), count: r.count})
         );
         result.count = this.infoShard.count;
 
@@ -439,6 +457,7 @@ class ShardedTable {
     /*
     query = {
         shards: ['shard1', 'shard2', ...] || '(s) => (s == 'shard1')',
+        persistent: Boolean,//do not unload shard while persistent == true
         count: Boolean,
         where: `@@index('field1', 10, 20)`,
         distinct: 'fieldName' || Array,
