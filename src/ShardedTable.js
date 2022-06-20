@@ -466,11 +466,13 @@ class ShardedTable {
         try {
             this._checkUniqueMeta(query);
 
-            for (const shard of this.shardList.keys()) {
-                await this._openShard(shard);
-                const table = this.openedShardTables.get(shard);
-
-                await table.create(query);
+            for (const shard of this.shardList.keys()) {                
+                const table = await this._lockShard(shard);
+                try {
+                    await table.create(query);
+                } finally {
+                    await this._unlockShard(shard);
+                }
 
                 this.changedTables.push(table);
                 this._checkTables(); //no await
@@ -501,10 +503,12 @@ class ShardedTable {
         await this.lock.get();
         try {
             for (const shard of this.shardList.keys()) {
-                await this._openShard(shard);
-                const table = this.openedShardTables.get(shard);
-
-                await table.drop(query);
+                const table = await this._lockShard(shard);
+                try {
+                    await table.drop(query);
+                } finally {
+                    await this._unlockShard(shard);
+                }
 
                 this.changedTables.push(table);
                 this._checkTables(); //no await
@@ -690,45 +694,37 @@ class ShardedTable {
 
             const result = {inserted: 0, replaced: 0};
 
-            //first step - insert to already opened shard tables
-            const shardedRowsSet = new Set(shardedRows.keys());
-            const shortSet = (shardedRowsSet.size < this.openedShardNames.size ? shardedRowsSet : this.openedShardNames);
-            for (const shard of shortSet) {
-                if (shardedRowsSet.has(shard) && this.openedShardNames.has(shard)) {
-                    //insert
-                    const rows = shardedRows.get(shard);
-                    const table = this.openedShardTables.get(shard);
+            //opened shards first
+            let shards = [];
+            const tailShards = [];
+            for (const shard of shardedRows.keys()) {
+                if (this.openedShardNames.has(shard))
+                    shards.push(shard);
+                else
+                    tailShards.push(shard);
+            }
+            shards = shards.concat(tailShards);
 
+            //inserting
+            for (const shard of shards) {
+                //insert
+                const rows = shardedRows.get(shard);
+
+                let shardCount = 0;
+                const table = await this._lockShard(shard);
+                try {
                     const insResult = await table.insert({rows});
                     this.changedTables.push(table);
                     result.inserted += insResult.inserted;
-
-                    const shardRec = this.shardList.get(shard);
-                    this.infoShard.count -= shardRec.count;
-                    shardRec.count = table.rowsInterface.getAllIdsSize();
-                    this.infoShard.count += shardRec.count;
-                    await this._saveShardRec(shardRec);
-                    await this._saveShardRec(this.infoShard);
-
-                    //update shardedRows
-                    shardedRows.delete(shard);
+                    shardCount = table.rowsInterface.getAllIdsSize();
+                } finally {
+                    await this._unlockShard(shard);
                 }
-            }
-
-            //second step - open & insert to other shard tables
-            for (const [shard, rows] of shardedRows) {
-                await this._openShard(shard);
-
-                const table = this.openedShardTables.get(shard);
-
-                const insResult = await table.insert({rows});
-                this.changedTables.push(table);
-                result.inserted += insResult.inserted;
 
                 const shardRec = this.shardList.get(shard);
                 this.infoShard.count -= shardRec.count;
-                shardRec.count = table.rowsInterface.getAllIdsSize();
-                this.infoShard.count += shardRec.count;
+                shardRec.count = shardCount;
+                this.infoShard.count += shardCount;
                 await this._saveShardRec(shardRec);
                 await this._saveShardRec(this.infoShard);
             }
