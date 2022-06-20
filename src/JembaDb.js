@@ -239,6 +239,7 @@ class JembaDb {
             return await this._drop(query);
         } finally {
             this._tableLock(table).ret();
+            this.tableLockMap.delete(table);
         }
     }
 
