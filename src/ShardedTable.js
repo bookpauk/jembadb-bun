@@ -588,7 +588,7 @@ class ShardedTable {
         //query.shards
         let selectedShards = [];
         if (!query.shards) {
-            selectedShards = this.shardList.keys();
+            selectedShards = Array.from(this.shardList.keys());
         } else {
             if (Array.isArray(query.shards)) {
                 for (const shard of query.shards) {
@@ -607,8 +607,12 @@ class ShardedTable {
         }
 
 
-        const result = [];
-        //select
+        const shardResult = [];
+        if (query.count) {
+            shardResult.push({count: this.infoShard.count});
+        }
+
+        //select from shards
         if (selectedShards.length) {
             //opened shards first
             selectedShards = this._getOpenedShardsFirst(selectedShards);
@@ -616,14 +620,35 @@ class ShardedTable {
             for (const shard of selectedShards) {
                 const table = await this._lockShard(shard);
                 try {
-                    result.push(await table.select(query));
+                    const rows = await table.select(query);
+                    if (query.count) {
+                        for (const row of rows)
+                            row.shard = shard;
+                    }
+
+                    shardResult.push(rows);
                 } finally {
                     await this._unlockShard(shard);
                 }
             }
         }
 
-        return [].concat(...result);
+        let result = [].concat(...shardResult);
+
+        //sorting
+        if (query.sort) {
+            const sortFunc = new Function(`'use strict'; return ${query.sort}`)();
+            result.sort(sortFunc);
+        }
+
+        //limits&offset
+        if (utils.hasProp(query, 'limit') || utils.hasProp(query, 'offset')) {
+            const offset = query.offset || 0;
+            const limit = (utils.hasProp(query, 'limit') ? query.limit : result.length);
+            result = result.slice(offset, offset + limit);
+        }
+
+        return result;
     }
 
     _genAutoShard() {
