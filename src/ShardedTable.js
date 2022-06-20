@@ -15,7 +15,7 @@ const LockQueue = require('./LockQueue');
 
 const BasicTable = require('./BasicTable');
 
-const shardCountStep = 20*1000*1000;//must be greater than 16M
+const shardRowCountStep = 20*1000*1000;//must be greater than 16M
 const maxFreeShardNumsLength = 100;
 const maxAutoShardListLength = 1000;
 const autoShardName = '___auto';
@@ -27,8 +27,8 @@ class ShardedTable {
         this.autoIncrement = 0;
         this.fileError = '';
 
-        this.lock = new LockQueue(100);
-        this.tableLockMap = new Map();
+        this.shardLockMap = new Map();
+        this.duiLockMap = new Map();
         this.cachedShardLock = new LockQueue(100);
 
         this.metaTable = null; //basic table
@@ -44,7 +44,7 @@ class ShardedTable {
         this.shardList = new Map();
         this.shardListTable = null;//basic table
 
-        this.shardLockList = new Map; //{lock: Number, pers: Number}
+        this.openedShardLockList = new Map; //{lock: Number, pers: Number}
 
         this.openedShardTables = new Map();//basic tables
         this.openedShardNames = new Set();
@@ -140,12 +140,23 @@ class ShardedTable {
         return this.freeShardNums.shift();
     }
 
-    _tableLock(table) {
-        let queue = this.tableLockMap.get(table);
+    _getShardLock(table) {
+        let queue = this.shardLockMap.get(table);
         
         if (!queue) {
             queue = new LockQueue(100);
-            this.tableLockMap.set(table, queue);
+            this.shardLockMap.set(table, queue);
+        }
+
+        return queue;
+    }
+
+    _getDUILock(table) {
+        let queue = this.duiLockMap.get(table);
+        
+        if (!queue) {
+            queue = new LockQueue(100);
+            this.duiLockMap.set(table, queue);
         }
 
         return queue;
@@ -161,12 +172,12 @@ class ShardedTable {
             this.cachedShardLock.get();
     }
 
-    _updateShardLockList(shard, lockN = 0, persN = 0) {
-        let lockRec = this.shardLockList.get(shard);
+    _updateOpenedShardLockList(shard, lockN = 0, persN = 0) {
+        let lockRec = this.openedShardLockList.get(shard);
 
         if (!lockRec) {
             lockRec = {lock: 0, pers: 0};
-            this.shardLockList.set(shard, lockRec);
+            this.openedShardLockList.set(shard, lockRec);
         }
 
         lockRec.lock += lockN;
@@ -203,9 +214,9 @@ class ShardedTable {
                 return;
 
             for (const shard of this.closableShardNames) {
-                const tabLock = this._tableLock(shard);
+                const shdLock = this._getShardLock(shard);
 
-                await tabLock.get();                
+                await shdLock.get();                
                 try {
                     if (this.cachedShardNames.size > this.cacheShards) {
                         if (this.closableShardNames.has(shard) && this.openedShardNames.has(shard)) {
@@ -223,7 +234,7 @@ class ShardedTable {
                         break;
                     }
                 } finally {
-                    tabLock.ret();
+                    shdLock.ret();
                 }
             }
         }
@@ -255,12 +266,14 @@ class ShardedTable {
     }
 
     async _lockShard(shard) {
-        const tabLock = this._tableLock(shard);
+        this._checkErrors();
 
-        await tabLock.get();
+        const shdLock = this._getShardLock(shard);
+
+        await shdLock.get();
         try {
             if (this.openedShardNames.has(shard)) {
-                this._updateShardLockList(shard, 1, 0);
+                this._updateOpenedShardLockList(shard, 1, 0);
                 return this.openedShardTables.get(shard);
             }
 
@@ -287,20 +300,20 @@ class ShardedTable {
             await newTable.open(query);
 
             if (isNew)
-                newTable.autoIncrement = shardCountStep*shardRec.num;
+                newTable.autoIncrement = shardRowCountStep*shardRec.num;
 
             this.openedShardTables.set(shard, newTable);
             this.openedShardNames.add(shard);
-            this._updateShardLockList(shard, 1, 0);
+            this._updateOpenedShardLockList(shard, 1, 0);
 
             return newTable;
         } finally {
-            tabLock.ret();
+            shdLock.ret();
         }
     }
 
     async _unlockShard(shard) {
-        this._updateShardLockList(shard, -1, 0);
+        this._updateOpenedShardLockList(shard, -1, 0);
 
         await this._closeShards();
     }
@@ -412,25 +425,20 @@ class ShardedTable {
         this.opened = false;
         this.closed = true;
 
-        await this.lock.get();
-        try {
-            await this.metaTable.close();
-            await this.shardListTable.close();
-            await this._closeShards(true);
+        await this._closeShards(true);
+        await this.metaTable.close();
+        await this.shardListTable.close();
 
-            while (this.checkingTables) {
-                await utils.sleep(10);
-            }
+        while (this.checkingTables) {
+            await utils.sleep(10);
+        }
 
-            if (this.fileError) {
-                try {
-                    await this._saveState('0');
-                } catch(e) {
-                    //
-                }
+        if (this.fileError) {
+            try {
+                await this._saveState('0');
+            } catch(e) {
+                //
             }
-        } finally {
-            this.lock.ret();
         }
     }
 
@@ -462,31 +470,26 @@ class ShardedTable {
     async create(query) {
         this._checkErrors();
 
-        await this.lock.get();
-        try {
-            this._checkUniqueMeta(query);
+        this._checkUniqueMeta(query);
 
-            for (const shard of this.shardList.keys()) {                
-                const table = await this._lockShard(shard);
-                try {
-                    await table.create(query);
-                } finally {
-                    await this._unlockShard(shard);
-                }
-
-                this.changedTables.push(table);
-                this._checkTables(); //no await
+        for (const shard of this.shardList.keys()) {
+            const table = await this._lockShard(shard);
+            try {
+                await table.create(query);
+            } finally {
+                await this._unlockShard(shard);
             }
 
-            const result = await this.metaTable.create(query);
-            
-            this.changedTables.push(this.metaTable);
+            this.changedTables.push(table);
             this._checkTables(); //no await
-
-            return result;
-        } finally {
-            this.lock.ret();
         }
+
+        const result = await this.metaTable.create(query);
+        
+        this.changedTables.push(this.metaTable);
+        this._checkTables(); //no await
+
+        return result;
     }
 
     /*
@@ -500,29 +503,24 @@ class ShardedTable {
     async drop(query) {
         this._checkErrors();
 
-        await this.lock.get();
-        try {
-            for (const shard of this.shardList.keys()) {
-                const table = await this._lockShard(shard);
-                try {
-                    await table.drop(query);
-                } finally {
-                    await this._unlockShard(shard);
-                }
-
-                this.changedTables.push(table);
-                this._checkTables(); //no await
+        for (const shard of this.shardList.keys()) {
+            const table = await this._lockShard(shard);
+            try {
+                await table.drop(query);
+            } finally {
+                await this._unlockShard(shard);
             }
 
-            const result = await this.metaTable.drop(query);
-
-            this.changedTables.push(this.metaTable);
+            this.changedTables.push(table);
             this._checkTables(); //no await
-
-            return result;
-        } finally {
-            this.lock.ret();
         }
+
+        const result = await this.metaTable.drop(query);
+
+        this.changedTables.push(this.metaTable);
+        this._checkTables(); //no await
+
+        return result;
     }
 
     /*
@@ -539,12 +537,12 @@ class ShardedTable {
         result.type = this.type;
         result.shardList = [];
         for (const shardRec of this.shardList.values()) {
-            const lock = this.shardLockList.get(shardRec.id);
+            const lockRec = this.openedShardLockList.get(shardRec.id);
 
             result.shardList.push({
                 shard: shardRec.id,
                 num: shardRec.num,
-                persistent: (lock ? lock.pers : 0),
+                persistent: (lockRec ? lockRec.pers : 0),
                 count: shardRec.count,
             });
         }
@@ -620,7 +618,9 @@ class ShardedTable {
             for (const shard of selectedShards) {
                 const table = await this._lockShard(shard);
                 try {
-                    const rows = await table.select(query);
+
+                    const rows = await table.select(query);//select
+
                     if (query.count) {
                         for (const row of rows)
                             row.shard = shard;
@@ -720,7 +720,6 @@ class ShardedTable {
     async insert(query = {}) {
         this._checkErrors();
 
-        await this.lock.get();
         try {
             if (!Array.isArray(query.rows)) {
                 throw new Error('query.rows must be an array');
@@ -766,32 +765,37 @@ class ShardedTable {
 
             //inserting
             for (const shard of shards) {
-                //insert
-                const rows = shardedRows.get(shard);
-
-                let shardCount = 0;
-                const table = await this._lockShard(shard);
+                const duiLock = await this._getDUILock(shard);
+                await duiLock.get();
                 try {
-                    const insResult = await table.insert({rows});
-                    this.changedTables.push(table);
-                    result.inserted += insResult.inserted;
-                    shardCount = table.rowsInterface.getAllIdsSize();
-                } finally {
-                    await this._unlockShard(shard);
-                }
+                    const rows = shardedRows.get(shard);
 
-                const shardRec = this.shardList.get(shard);
-                this.infoShard.count -= shardRec.count;
-                shardRec.count = shardCount;
-                this.infoShard.count += shardCount;
-                await this._saveShardRec(shardRec);
-                await this._saveShardRec(this.infoShard);
+                    let shardRowCount = 0;
+                    const table = await this._lockShard(shard);
+                    try {
+                        const insResult = await table.insert({rows});//insert
+
+                        this.changedTables.push(table);
+                        result.inserted += insResult.inserted;
+                        shardRowCount = table.rowsInterface.getAllIdsSize();
+                    } finally {
+                        await this._unlockShard(shard);
+                    }
+
+                    const shardRec = this.shardList.get(shard);
+                    this.infoShard.count -= shardRec.count;
+                    shardRec.count = shardRowCount;
+                    this.infoShard.count += shardRowCount;
+                    await this._saveShardRec(shardRec);
+                    await this._saveShardRec(this.infoShard);
+                } finally {
+                    duiLock.ret();
+                }
             }
 
             return result;
         } finally {
             this._checkTables(); //no await
-            this.lock.ret();
         }
     }
 
