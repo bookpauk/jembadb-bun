@@ -553,10 +553,24 @@ class ShardedTable {
         return result;
     }
 
+    _getOpenedShardsFirst(shardsIter) {
+        const shards = [];
+        const tailShards = [];
+
+        for (const shard of shardsIter) {
+            if (this.openedShardNames.has(shard))
+                shards.push(shard);
+            else
+                tailShards.push(shard);
+        }
+
+        return shards.concat(tailShards);
+    }
+
     /*
     query = {
         shards: ['shard1', 'shard2', ...] || '(s) => (s == 'shard1')',
-        persistent: Boolean,//do not unload shard while persistent == true
+        persistent: Boolean,//do not unload query.shards while persistent == true
         count: Boolean,
         where: `@@index('field1', 10, 20)`,
         distinct: 'fieldName' || Array,
@@ -571,17 +585,45 @@ class ShardedTable {
     async select(query = {}) {
         this._checkErrors();
 
-        await this.lock.get();
-        try {
-            /*const selectedShards = [];
-            if (!query.shards) {
-                selectedShards = this.shardList.keys();
+        //query.shards
+        let selectedShards = [];
+        if (!query.shards) {
+            selectedShards = this.shardList.keys();
+        } else {
+            if (Array.isArray(query.shards)) {
+                for (const shard of query.shards) {
+                    if (this.shardList.get(shard))
+                        selectedShards.push(shard);
+                }
+            } else if (typeof(query.shards) === 'string') {
+                const shardTestFunc = new Function(`'use strict'; return ${query.shards}`)();
+                for (const shard of this.shardList.keys()) {
+                    if (shardTestFunc(shard))
+                        selectedShards.push(shard);
+                }
             } else {
-            }*/
-
-        } finally {
-            this.lock.ret();
+                throw new Error('Uknown query.shards param type');
+            }
         }
+
+
+        const result = [];
+        //select
+        if (selectedShards.length) {
+            //opened shards first
+            selectedShards = this._getOpenedShardsFirst(selectedShards);
+
+            for (const shard of selectedShards) {
+                const table = await this._lockShard(shard);
+                try {
+                    result.push(await table.select(query));
+                } finally {
+                    await this._unlockShard(shard);
+                }
+            }
+        }
+
+        return [].concat(...result);
     }
 
     _genAutoShard() {
@@ -695,15 +737,7 @@ class ShardedTable {
             const result = {inserted: 0, replaced: 0};
 
             //opened shards first
-            let shards = [];
-            const tailShards = [];
-            for (const shard of shardedRows.keys()) {
-                if (this.openedShardNames.has(shard))
-                    shards.push(shard);
-                else
-                    tailShards.push(shard);
-            }
-            shards = shards.concat(tailShards);
+            const shards = this._getOpenedShardsFirst(shardedRows.keys());
 
             //inserting
             for (const shard of shards) {
