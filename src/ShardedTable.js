@@ -524,7 +524,7 @@ class ShardedTable {
         flag:  Array, [{name: 'flag1', check: '(r) => r.id > 10'}, ...]
         hash:  Array, [{field: 'field1', type: 'string', depth: 11, allowUndef: false}, ...]
         index: Array, [{field: 'field1', type: 'string', depth: 11, allowUndef: false}, ...]
-        shardList: [{shard: 'string', num: 1, persistent: false, count: 10}, ...]
+        shardList: [{shard: 'string', num: 1, open: false, persistent: false, count: 10}, ...]
     }
     */
     async getMeta() {
@@ -537,6 +537,7 @@ class ShardedTable {
             result.shardList.push({
                 shard: shardRec.id,
                 num: shardRec.num,
+                open: this.openedShardTables.has(shardRec.id),
                 persistent: (lockRec ? lockRec.pers : 0),
                 count: shardRec.count,
             });
@@ -599,11 +600,12 @@ class ShardedTable {
             }
         }
 
-
         const shardResult = [];
         if (query.count) {
             shardResult.push({count: this.infoShard.count});
         }
+
+        const queryHasPersistent = utils.hasProp(query, 'persistent');
 
         //select from shards
         if (selectedShards.length) {
@@ -613,6 +615,12 @@ class ShardedTable {
             for (const shard of selectedShards) {
                 const table = await this._lockShard(shard);
                 try {
+                    if (queryHasPersistent) {
+                        if (query.persistent)
+                            this._updateOpenedShardLockList(shard, 0, 1);
+                        else
+                            this._updateOpenedShardLockList(shard, 0, -1);
+                    }
 
                     const rows = await table.select(query);//select
 
