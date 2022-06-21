@@ -92,9 +92,9 @@ class ShardedTable {
             srcMetaTable = this.metaTable;
         } else {
             srcShardListTable = new BasicTable();
-            await srcShardListTable.open({tablePath: `${srcTablePath}/shards`});
+            await srcShardListTable.open({tablePath: `${srcTablePath}/shards`, autoRepair: this.autoRepair});
             srcMetaTable = new BasicTable();
-            await srcMetaTable.open({tablePath: `${srcTablePath}/meta`});
+            await srcMetaTable.open({tablePath: `${srcTablePath}/meta`, autoRepair: this.autoRepair});
         }
 
         const meta = await srcMetaTable.getMeta();
@@ -182,10 +182,10 @@ class ShardedTable {
 
     async _loadMeta() {
         this.metaTable = new BasicTable();
-        await this.metaTable.open({tablePath: `${this.tablePath}/meta`});
+        await this.metaTable.open({tablePath: `${this.tablePath}/meta`, autoRepair: this.autoRepair});
 
         this.shardListTable = new BasicTable();
-        await this.shardListTable.open({tablePath: `${this.tablePath}/shards`});
+        await this.shardListTable.open({tablePath: `${this.tablePath}/shards`, autoRepair: this.autoRepair});
 
         const rows = await this.shardListTable.select({});//all
         for (const row of rows) {
@@ -463,7 +463,6 @@ class ShardedTable {
 
             this.openQuery = utils.cloneDeep(query);
             this.openQuery.recreate = false;
-            this.openQuery.autoRepair = false;
 
             let create = true;
             if (await utils.pathExists(this.tablePath)) {
