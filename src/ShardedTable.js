@@ -115,45 +115,53 @@ class ShardedTable {
         await destMetaTable.close();
 
         const query = utils.cloneDeep(this.openQuery);
+        const nodata = (filter === 'nodata');
+
         let totalCount = 0;
-        for (const shardRec of srcShardList) {
-            if (shardRec.id === '')
-                continue;
-            
-            const toTablePath = this._shardTablePath(shardRec.num, destTablePath);
+        if (!nodata) {
+            for (const shardRec of srcShardList) {
+                if (shardRec.id === '')
+                    continue;
+                
+                const toTablePath = this._shardTablePath(shardRec.num, destTablePath);
 
-            //cloning shard
-            if (cloneSelf) {
-                const table = await this._lockShard(shardRec.id);
-                try {
+                //cloning shard
+                if (cloneSelf) {
+                    const table = await this._lockShard(shardRec.id);
+                    try {
+                        await table.clone({toTablePath, noMeta: true, filter});
+                    } finally {
+                        await this._unlockShard(shardRec.id);
+                    }
+                } else {
+                    const table = new BasicTable();
+                    query.tablePath = this._shardTablePath(shardRec.num, srcTablePath);
+                    await table.open(query);
+
                     await table.clone({toTablePath, noMeta: true, filter});
-                } finally {
-                    await this._unlockShard(shardRec.id);
+                    await table.close();
                 }
-            } else {
-                const table = new BasicTable();
-                query.tablePath = this._shardTablePath(shardRec.num, srcTablePath);
-                await table.open(query);
 
-                await table.clone({toTablePath, noMeta: true, filter});
-                await table.close();
+                //read cloned shard, create meta
+                const destTable = new BasicTable();
+                query.tablePath = toTablePath;
+
+                await destTable.open(query);
+                if (!noMeta)
+                    await destTable.create(meta);
+
+                const shardCount = await destTable.select({count: true});
+                await destTable.close();
+
+                //save shardRec
+                const count = shardCount[0].count;
+                if (count > 0) {
+                    await destShardListTable.insert({rows: [{id: shardRec.id, num: shardRec.num, count}]});
+                    totalCount += count;
+                } else {
+                    await fs.rmdir(toTablePath, { recursive: true });
+                }
             }
-
-            //read cloned shard, create meta
-            const destTable = new BasicTable();
-            query.tablePath = toTablePath;
-
-            await destTable.open(query);
-            if (!noMeta)
-                await destTable.create(meta);
-
-            const shardCount = await destTable.select({count: true});
-            await destTable.close();
-
-            //save shardRec
-            const count = shardCount[0].count;
-            await destShardListTable.insert({rows: [{id: shardRec.id, num: shardRec.num, count}]});
-            totalCount += count;
         }
 
         await destShardListTable.insert({rows: [{id: '', count: totalCount}]});
