@@ -1,6 +1,8 @@
-const Table = require('./Table');
+'use strict';
 
-class TableMem extends Table {
+const BasicTable = require('./BasicTable');
+
+class MemoryTable extends BasicTable {
     constructor() {
         super();
 
@@ -20,7 +22,6 @@ class TableMem extends Table {
         if (!query.toTableInstance)
             throw new Error(`'query.toTableInstance' parameter is required`);
 
-        await this.openingLock.wait();
         this._checkErrors();
 
         await this.lock.get();
@@ -33,7 +34,7 @@ class TableMem extends Table {
             }
 
             let filterFunc = null;
-            let nodata = (query.filter === 'nodata');
+            const nodata = (query.filter === 'nodata');
             if (query.filter && !nodata) {
                 filterFunc = new Function(`'use strict'; return ${query.filter}`)();
             } else {
@@ -55,4 +56,4 @@ class TableMem extends Table {
 
 }
 
-module.exports = TableMem;
+module.exports = MemoryTable;

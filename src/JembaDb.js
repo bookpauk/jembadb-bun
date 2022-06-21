@@ -2,8 +2,9 @@
 
 const fs = require('fs').promises;
 
-const Table = require('./Table');
-const TableMem = require('./TableMem');
+const MemoryTable = require('./MemoryTable');
+const ShardedTable = require('./ShardedTable');
+const BasicTable = require('./BasicTable');
 
 const LockQueue = require('./LockQueue');
 const utils = require('./utils');
@@ -52,14 +53,14 @@ class JembaDb {
 
         //table open defaults
         tableDefaults: {
-            type: 'basic' | 'memory' | 'huge', default 'basic'
+            type: 'basic' | 'memory' | 'sharded', default 'basic'
             cacheSize: Number, 5
-            blockSize: Number, 1000000, for huge table only
+            cacheShards: Number, 1, for sharded table only
+            autoShardSize: Number, 1000000, for sharded table only
             compressed: Number, {0..9}, 0
             recreate: Boolean, false,
             autoRepair: Boolean, false,
             forceFileClosing: Boolean, false,
-            lazyOpen: Boolean, false,
             typeCompatMode: Boolean, false,
         },
     }
@@ -144,14 +145,14 @@ class JembaDb {
         quietIfExists: Boolean,
         asSelect: Object, select query,
 
-        type: 'basic' | 'memory' | 'huge', default 'basic'
+        type: 'basic' | 'memory' | 'sharded', default 'basic'
         cacheSize: Number, 5
-        blockSize: Number, 1000000, for huge table only
+        cacheShards: Number, 1, for sharded table only
+        autoShardSize: Number, 1000000, for sharded table only
         compressed: Number, {0..9}, 0
         recreate: Boolean, false,
         autoRepair: Boolean, false,
         forceFileClosing: Boolean, false,
-        lazyOpen: Boolean, false,
         typeCompatMode: Boolean, false,
 
     (*) in: 'tableName',
@@ -239,6 +240,7 @@ class JembaDb {
             return await this._drop(query);
         } finally {
             this._tableLock(table).ret();
+            this.tableLockMap.delete(table);
         }
     }
 
@@ -298,7 +300,7 @@ class JembaDb {
             const tableInstance = this.table.get(table);
             if (tableInstance) {
                 if (tableInstance.type === 'memory') {
-                    const newTableInstance = new TableMem();
+                    const newTableInstance = new MemoryTable();
 
                     const opts = Object.assign({}, this.tableOpenDefaults);
                     await newTableInstance.open(opts);
@@ -308,6 +310,7 @@ class JembaDb {
                     this.table.set(table, newTableInstance);
                 } else {
                     const toTable = `${table}___temporary_truncating`;
+                    await fs.rmdir(`${this.dbPath}/${toTable}`, { recursive: true });
 
                     await this._clone({table, toTable, filter: 'nodata'});
 
@@ -363,7 +366,7 @@ class JembaDb {
             }
 
             if (tableInstance.type === 'memory') {
-                const newTableInstance = new TableMem();
+                const newTableInstance = new MemoryTable();
 
                 const opts = Object.assign({}, this.tableOpenDefaults);
                 await newTableInstance.open(opts);
@@ -385,19 +388,30 @@ class JembaDb {
         }
     }
 
+    async _getTableType(query) {
+        let result = 'basic';
+
+        const typePath = `${this.dbPath}/${query.table}/type`;
+        if (await utils.pathExists(typePath)) {
+            result = await fs.readFile(typePath, 'utf8');
+        }
+
+        return result;
+    }
+
     /*
     query = {
     (!) table: 'tableName',
         create: Boolean, false,
 
-        type: 'basic' | 'memory' | 'huge', default 'basic'
+        type: 'basic' | 'memory' | 'sharded', default 'basic'
         cacheSize: Number, 5
-        blockSize: Number, 1000000, for huge table only
+        cacheShards: Number, 1, for sharded table only
+        autoShardSize: Number, 1000000, for sharded table only
         compressed: Number, {0..9}, 0
         recreate: Boolean, false,
         autoRepair: Boolean, false,
         forceFileClosing: Boolean, false,
-        lazyOpen: Boolean, false,
         typeCompatMode: Boolean, false,
     }
     */
@@ -407,15 +421,21 @@ class JembaDb {
         if (!query.table)
             throw new Error(`'query.table' parameter is required`);
 
-        if (await this.tableExists({table: query.table}) || query.create) {
+        const tableExists = await this.tableExists({table: query.table});
+        if (tableExists || query.create) {
             let tableInstance = this.table.get(query.table);
 
             if (!tableInstance || !tableInstance.opened) {
+                let type = query.type;
+                if (tableExists)
+                    type = await this._getTableType(query);
 
-                if (query.type === 'memory') {
-                    tableInstance = new TableMem();
+                if (type === 'memory') {
+                    tableInstance = new MemoryTable();
+                } else if (type === 'sharded') {
+                    tableInstance = new ShardedTable();
                 } else {
-                    tableInstance = new Table();
+                    tableInstance = new BasicTable();
                 }
                 this.table.set(query.table, tableInstance);
 
@@ -455,14 +475,14 @@ class JembaDb {
 
     /*
     query = {
-        type: 'basic' | 'memory' | 'huge', default 'basic'
+        type: 'basic' | 'memory' | 'sharded', default 'basic'
         cacheSize: Number, 5
-        blockSize: Number, 1000000, for huge table only
+        cacheShards: Number, 1, for sharded table only
+        autoShardSize: Number, 1000000, for sharded table only
         compressed: Number, {0..9}, 0
         recreate: Boolean, false,
         autoRepair: Boolean, false,
         forceFileClosing: Boolean, false,
-        lazyOpen: Boolean, false,
     }
     */
     async openAll(query = {}) {
@@ -615,6 +635,8 @@ class JembaDb {
     /*
     query = {
     (!) table: 'tableName',
+        shards: ['shard1', 'shard2', ...] || '(s) => (s == 'shard1')', //for sharded table only
+        persistent: Boolean,//for sharded table only, do not unload shard while persistent == true
         count: Boolean,
         where: `@@index('field1', 10, 20)`,
         distinct: 'fieldName' || Array,
@@ -686,6 +708,7 @@ class JembaDb {
     query = {
     (!) table: 'tableName',
         replace: Boolean,
+        shardGen: '(r) => r.date',//for sharded table only
     (!) rows: Array,
     }
     result = {
@@ -711,6 +734,7 @@ class JembaDb {
     query = {
     (!) table: 'tableName',
     (!) mod: '(r) => r.count++',
+        shards: ['shard1', 'shard2', ...] || '(s) => (s == 'shard1')', //for sharded table only
         where: `@@index('field1', 10, 20)`,
         sort: '(a, b) => a.id - b.id',
         limit: 10,
@@ -762,6 +786,7 @@ class JembaDb {
 
     /*
     query = {
+    (!) table: 'tableName',
         message: String,
     }
     result = {}

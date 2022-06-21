@@ -1032,6 +1032,23 @@ class TableReducer {
         this._items.delete(name);
     }
 
+    async limit(ids, lim, ofs = 0) {
+        const result = new Set();
+        for (const id of ids) {
+            if (ofs > 0) {
+                ofs--;
+                continue;
+            }
+
+            if (lim <= 0)
+                break;
+
+            result.add(id);
+            lim--;
+        }
+        return result;
+    }
+
     async and() {
         const result = [];
         for (const arg of arguments) {

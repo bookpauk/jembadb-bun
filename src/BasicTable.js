@@ -1,5 +1,8 @@
 'use strict';
-
+/*
+    Limitations:
+    - maximum rec count is ~16000000 (limitation of JS Map)
+*/
 const fs = require('fs').promises;
 const utils = require('./utils');
 
@@ -10,7 +13,7 @@ const LockQueue = require('./LockQueue');
 
 const maxChangesLength = 10;
 
-class Table {
+class BasicTable {
     constructor() {
         this.type = 'basic';
 
@@ -19,7 +22,6 @@ class Table {
         this.autoIncrement = 0;
         this.fileError = '';
 
-        this.openingLock = new LockQueue(100);
         this.lock = new LockQueue(100);
 
         this.opened = false;
@@ -66,7 +68,7 @@ class Table {
 
         // '(r) => true' || 'nodata',
         let filterFunc = null;
-        let nodata = (filter === 'nodata');
+        const nodata = (filter === 'nodata');
         if (filter && !nodata) {
             filterFunc = new Function(`'use strict'; return ${filter}`)();
         } else {
@@ -208,16 +210,14 @@ class Table {
         recreate: Boolean, false,
         autoRepair: Boolean, false,
         forceFileClosing: Boolean, false,
-        lazyOpen: Boolean, false,
         typeCompatMode: Boolean, false,
     }
     */
-    async _open(query = {}) {
+    async open(query = {}) {
         if (this.opening)
             throw new Error('Table open in progress');
 
         this.opening = true;
-        await this.openingLock.get();
         //console.log(query);
         try {
             if (this.opened)
@@ -308,24 +308,11 @@ class Table {
             this.opened = true;
         } catch(e) {
             await this.close();
-            const errMes = `Open table (${query.tablePath}): ${e.message}`;
-            if (!query.lazyOpen)
-                throw new Error(errMes);
-            else
-                this.fileError = errMes;
+            throw new Error(`Open table (${query.tablePath}): ${e.message}`);
         } finally {
-            this.openingLock.free();
             this.opening = false;
         }
     }
-
-    async open(query = {}) {
-        if (query.lazyOpen) {
-            this._open(query);
-        } else {
-            await this._open(query);
-        }
-    }    
 
     async close() {
         if (this.closed)
@@ -334,29 +321,34 @@ class Table {
         this.opened = false;
         this.closed = true;
 
-        if (!this.inMemory) {
-            while (this.savingChanges) {
-                await utils.sleep(10);
+        await this.lock.get();
+        try {
+            if (!this.inMemory) {
+                while (this.savingChanges) {
+                    await utils.sleep(10);
+                }
             }
-        }
 
-        if (this.fileError) {
-            try {
-                await this._saveState('0');
-            } catch(e) {
-                //
+            if (this.fileError) {
+                try {
+                    await this._saveState('0');
+                } catch(e) {
+                    //
+                }
             }
+
+            //for GC
+            if (this.reducer)
+                await this.reducer._destroy();
+            this.reducer = null;
+
+            if (this.rowsInterface)
+                await this.rowsInterface.destroy();
+            this.rowsInterface = null;
+            this.tableRowsFile = null;
+        } finally {
+            this.lock.ret();
         }
-
-        //for GC
-        if (this.reducer)
-            await this.reducer._destroy();
-        this.reducer = null;
-
-        if (this.rowsInterface)
-            await this.rowsInterface.destroy();
-        this.rowsInterface = null;
-        this.tableRowsFile = null;
     }
 
     /*
@@ -369,7 +361,6 @@ class Table {
     result = {}
     */
     async create(query) {
-        await this.openingLock.wait();
         this._checkErrors();
 
         await this.lock.get();
@@ -416,7 +407,6 @@ class Table {
     result = {}
     */
     async drop(query) {
-        await this.openingLock.wait();
         this._checkErrors();
 
         await this.lock.get();
@@ -494,7 +484,6 @@ class Table {
     result = Array
     */
     async select(query = {}) {
-        await this.openingLock.wait();
         this._checkErrors();
 
         let ids;//iterator
@@ -624,7 +613,6 @@ class Table {
     }
     */
     async insert(query = {}) {
-        await this.openingLock.wait();
         this._checkErrors();
 
         await this.lock.get();
@@ -713,7 +701,6 @@ class Table {
     }
     */
     async update(query = {}) {
-        await this.openingLock.wait();
         this._checkErrors();
 
         await this.lock.get();
@@ -818,7 +805,6 @@ class Table {
     }
     */
     async delete(query = {}) {
-        await this.openingLock.wait();
         this._checkErrors();
 
         await this.lock.get();
@@ -909,15 +895,14 @@ class Table {
     result = {}
     */
     async clone(query = {}) {
+        this._checkErrors();
+
         if (this.inMemory) {
             throw new Error(`inMemory table can't be cloned`);
         }
 
         if (!query.toTablePath || typeof(query.toTablePath) !== 'string')
             throw new Error(`'query.toTablePath' parameter is required`);
-
-        await this.openingLock.wait();
-        this._checkErrors();
 
         await this.lock.get();
         try {
@@ -997,4 +982,4 @@ class Table {
 
 }
 
-module.exports = Table;
+module.exports = BasicTable;
