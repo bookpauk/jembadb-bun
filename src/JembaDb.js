@@ -716,6 +716,7 @@ class JembaDb {
     query = {
     (!) table: 'tableName',
     (!) mod: '(r) => r.count++',
+        shards: ['shard1', 'shard2', ...] || '(s) => (s == 'shard1')', //for sharded table only
         where: `@@index('field1', 10, 20)`,
         sort: '(a, b) => a.id - b.id',
         limit: 10,

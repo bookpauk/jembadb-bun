@@ -7,7 +7,7 @@
     - rec.shard field required while insert
     - no unique hashes and indexes
     - maximum rec count per one shard is ~16000000 (limitation of JS Map)
-    - possible unexpected behavior for select with limit,offset params
+    - seeming unexpected behavior for select|update|delete with sort,limit,offset params, but it is not
 */
 const fs = require('fs').promises;
 const utils = require('./utils');
@@ -214,7 +214,7 @@ class ShardedTable {
             for (const shard of this.closableShardNames) {
                 const shdLock = this._getShardLock(shard);
 
-                await shdLock.get();                
+                await shdLock.get();
                 try {
                     if (this.cachedShardNames.size > this.cacheShards) {
                         if (this.closableShardNames.has(shard) && this.openedShardTables.has(shard)) {
@@ -238,27 +238,43 @@ class ShardedTable {
     }
 
     async _delShards(shardArr) {
-        /*for (const shard of shardArr) {
-            if (this.openedShardTables.has(shard)) {
-                const table = this.openedShardTables.get(shard);
+        this._checkErrors();
 
-                await table.close();
+        for (const shard of shardArr) {
+            const duiLock = this._getDUILock(shard);
+            const shdLock = this._getShardLock(shard);
 
-                this.openedShardTables.delete(shard);
+            await duiLock.get();
+            await shdLock.get();
+            try {
+                if (this.openedShardTables.has(shard)) {
+                    if (!this.closableShardNames.has(shard))
+                        continue;
+
+                    const table = this.openedShardTables.get(shard);
+
+                    await table.close();
+
+                    this.openedShardTables.delete(shard);
+                    this.closableShardNames.delete(shard);
+                    this.cachedShardNames.delete(shard);
+                    this._checkCachedShardLock();
+                }
+
+                const shardRec = this.shardList.get(shard);
+                if (!shardRec || shardRec.count > 0)
+                    continue;
+
+                await this._delShardRec(shardRec);
+                this.shardList.delete(shard);
+                this.openedShardLockList.delete(shard);
+
+                await fs.rmdir(this._shardTablePath(shardRec.num), { recursive: true });
+            } finally {
+                shdLock.ret();
+                duiLock.ret();
             }
-
-            const shardRec = this.shardList.get(shard);
-            if (!shardRec)
-                throw new Error('Something wrong: trying to delete not existing shard');
-
-            if (shardRec.count)
-                throw new Error(`Something wrong: trying to delete not empty shard: ${JSON.stringify(shardRec)}`);
-
-            await this._delShardRec(shardRec);
-            this.shardList.delete(shard);
-
-            await fs.rmdir(this._shardTablePath(shardRec.num), { recursive: true });
-        }*/
+        }
     }
 
     async _lockShard(shard) {
@@ -561,25 +577,7 @@ class ShardedTable {
         return shards.concat(tailShards);
     }
 
-    /*
-    query = {
-        shards: ['shard1', 'shard2', ...] || '(s) => (s == 'shard1')',
-        persistent: Boolean,//do not unload query.shards while persistent == true
-        count: Boolean,
-        where: `@@index('field1', 10, 20)`,
-        distinct: 'fieldName' || Array,
-        group: {byField: 'fieldName' || Array, byExpr: '(r) => groupingValue', countField: 'fieldName'},
-        map: '(r) => ({id1: r.id, ...})',
-        sort: '(a, b) => a.id - b.id',
-        limit: 10,
-        offset: 10,
-    }
-    result = Array
-    */
-    async select(query = {}) {
-        this._checkErrors();
-
-        //query.shards
+    _parseQueryShards(query) {
         let selectedShards = [];
         if (!query.shards) {
             selectedShards = Array.from(this.shardList.keys());
@@ -599,40 +597,59 @@ class ShardedTable {
                 throw new Error('Uknown query.shards param type');
             }
         }
+        //opened shards first
+        selectedShards = this._getOpenedShardsFirst(selectedShards);
+        return selectedShards;
+    }
+
+    /*
+    query = {
+        shards: ['shard1', 'shard2', ...] || '(s) => (s == 'shard1')',
+        persistent: Boolean,//do not unload query.shards while persistent == true
+        count: Boolean,
+        where: `@@index('field1', 10, 20)`,
+        distinct: 'fieldName' || Array,
+        group: {byField: 'fieldName' || Array, byExpr: '(r) => groupingValue', countField: 'fieldName'},
+        map: '(r) => ({id1: r.id, ...})',
+        sort: '(a, b) => a.id - b.id',
+        limit: 10,
+        offset: 10,
+    }
+    result = Array
+    */
+    async select(query = {}) {
+        this._checkErrors();
+
+        //query.shards
+        const selectedShards = this._parseQueryShards(query);
+        const queryHasPersistent = utils.hasProp(query, 'persistent');
 
         const shardResult = [];
         if (query.count) {
             shardResult.push({count: this.infoShard.count});
         }
 
-        const queryHasPersistent = utils.hasProp(query, 'persistent');
-
         //select from shards
-        if (selectedShards.length) {
-            //opened shards first
-            selectedShards = this._getOpenedShardsFirst(selectedShards);
-
-            for (const shard of selectedShards) {
-                const table = await this._lockShard(shard);
-                try {
-                    if (queryHasPersistent) {
-                        if (query.persistent)
-                            this._updateOpenedShardLockList(shard, 0, 1);
-                        else
-                            this._updateOpenedShardLockList(shard, 0, -1);
-                    }
-
-                    const rows = await table.select(query);//select
-
-                    if (query.count) {
-                        for (const row of rows)
-                            row.shard = shard;
-                    }
-
-                    shardResult.push(rows);
-                } finally {
-                    await this._unlockShard(shard);
+        for (const shard of selectedShards) {
+            const table = await this._lockShard(shard);
+            try {
+                if (queryHasPersistent) {
+                    if (query.persistent)
+                        this._updateOpenedShardLockList(shard, 0, 1);
+                    else
+                        this._updateOpenedShardLockList(shard, 0, -1);
                 }
+
+                const rows = await table.select(query);//select
+
+                if (query.count) {
+                    for (const row of rows)
+                        row.shard = shard;
+                }
+
+                shardResult.push(rows);
+            } finally {
+                await this._unlockShard(shard);
             }
         }
 
@@ -718,6 +735,7 @@ class ShardedTable {
     result = {
     (!) inserted: Number,
     (!) replaced: Number,//always 0
+    (!) shardList: [{shard: 'name', inserted: Number}]
     }
     */
     async insert(query = {}) {
@@ -761,14 +779,14 @@ class ShardedTable {
                 r.push(row);
             }
 
-            const result = {inserted: 0, replaced: 0};
+            const result = {inserted: 0, replaced: 0, shardList: []};
 
             //opened shards first
             const shards = this._getOpenedShardsFirst(shardedRows.keys());
 
             //inserting
             for (const shard of shards) {
-                const duiLock = await this._getDUILock(shard);
+                const duiLock = this._getDUILock(shard);
                 await duiLock.get();
                 try {
                     const rows = shardedRows.get(shard);
@@ -780,6 +798,7 @@ class ShardedTable {
 
                         this.changedTables.push(table);
                         result.inserted += insResult.inserted;
+                        result.shardList.push({shard, inserted: insResult.inserted});
                         shardRowCount = table.rowsInterface.getAllIdsSize();
                     } finally {
                         await this._unlockShard(shard);
@@ -805,6 +824,7 @@ class ShardedTable {
     /*
     query = {
     (!) mod: '(r) => r.count++',
+        shards: ['shard1', 'shard2', ...] || '(s) => (s == 'shard1')',
         where: `@@index('field1', 10, 20)`,
         sort: '(a, b) => a.id - b.id',
         limit: 10,
@@ -812,13 +832,41 @@ class ShardedTable {
     }
     result = {
     (!) updated: Number,
+    (!) shardList: [{shard: 'name', updated: Number}]
     }
     */
     async update(query = {}) {
+        this._checkErrors();
+
+        //query.shards
+        const selectedShards = this._parseQueryShards(query);
+        const result = {updated: 0, shardList: []};
+
+        //update shards
+        for (const shard of selectedShards) {
+            const duiLock = this._getDUILock(shard);
+            await duiLock.get();
+            try {
+                const table = await this._lockShard(shard);
+                try {
+                    const updResult = await table.update(query);//update
+
+                    result.updated += updResult.updated;
+                    result.shardList.push({shard, updated: updResult.updated});
+                } finally {
+                    await this._unlockShard(shard);
+                }
+            } finally {
+                duiLock.ret();
+            }
+        }
+
+        return result;
     }
 
     /*
     query = {
+        shards: ['shard1', 'shard2', ...] || '(s) => (s == 'shard1')',
         where: `@@index('field1', 10, 20)`,
         sort: '(a, b) => a.id - b.id',
         limit: 10,
@@ -826,11 +874,58 @@ class ShardedTable {
     }
     result = {
     (!) deleted: Number,
+    (!) shardList: [{shard: 'name', deleted: Number}]
     }
     */
     async delete(query = {}) {
-        //if deleted > 0
-        this.autoShard.step = 0;
+        this._checkErrors();
+
+        //query.shards
+        const selectedShards = this._parseQueryShards(query);
+
+        const shardsToDelete = [];
+        const result = {deleted: 0, shardList: []};
+        //delete from shards
+        for (const shard of selectedShards) {
+            const duiLock = this._getDUILock(shard);
+            await duiLock.get();
+            try {
+                let shardRowCount = 0;
+                let delResult = null;
+                const table = await this._lockShard(shard);
+                try {
+                    delResult = await table.delete(query);//delete
+
+                    result.deleted += delResult.deleted;
+                    result.shardList.push({shard, deleted: delResult.deleted});
+                    shardRowCount = table.rowsInterface.getAllIdsSize();
+                } finally {
+                    await this._unlockShard(shard);
+                }
+
+                if (delResult.deleted > 0) {
+                    const shardRec = this.shardList.get(shard);
+                    this.infoShard.count -= shardRec.count;
+                    shardRec.count = shardRowCount;
+                    this.infoShard.count += shardRowCount;
+                    await this._saveShardRec(shardRec);
+                    await this._saveShardRec(this.infoShard);
+
+                    if (shardRec.count <= 0)
+                        shardsToDelete.push(shard);
+                }
+            } finally {
+                duiLock.ret();
+            }
+        }
+
+        if (result.deleted > 0)
+            this.autoShard.step = 0;
+
+        if (shardsToDelete.length)
+            await this._delShards(shardsToDelete);
+
+        return result;
     }        
 
     /*
