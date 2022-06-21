@@ -44,10 +44,9 @@ class ShardedTable {
         this.shardList = new Map();
         this.shardListTable = null;//basic table
 
-        this.openedShardLockList = new Map; //{lock: Number, pers: Number}
+        this.openedShardLockList = new Map;//{lock: Number, pers: Number}
 
         this.openedShardTables = new Map();//basic tables
-        this.openedShardNames = new Set();
         this.closableShardNames = new Set();
         this.cachedShardNames = new Set();
 
@@ -207,7 +206,6 @@ class ShardedTable {
             for (const [shard, table] of this.openedShardTables) {
                 await table.close();
                 this.openedShardTables.delete(shard);
-                this.openedShardNames.delete(shard);
             }
         } else {
             if (this.cachedShardNames.size <= this.cacheShards)
@@ -219,13 +217,12 @@ class ShardedTable {
                 await shdLock.get();                
                 try {
                     if (this.cachedShardNames.size > this.cacheShards) {
-                        if (this.closableShardNames.has(shard) && this.openedShardNames.has(shard)) {
+                        if (this.closableShardNames.has(shard) && this.openedShardTables.has(shard)) {
                             const table = this.openedShardTables.get(shard);
 
                             await table.close();
 
                             this.openedShardTables.delete(shard);
-                            this.openedShardNames.delete(shard);
                             this.cachedShardNames.delete(shard);
                             this._checkCachedShardLock();
                         }
@@ -242,13 +239,12 @@ class ShardedTable {
 
     async _delShards(shardArr) {
         /*for (const shard of shardArr) {
-            if (this.openedShardNames.has(shard)) {
+            if (this.openedShardTables.has(shard)) {
                 const table = this.openedShardTables.get(shard);
 
                 await table.close();
 
                 this.openedShardTables.delete(shard);
-                this.openedShardNames.delete(shard);
             }
 
             const shardRec = this.shardList.get(shard);
@@ -272,7 +268,7 @@ class ShardedTable {
 
         await shdLock.get();
         try {
-            if (this.openedShardNames.has(shard)) {
+            if (this.openedShardTables.has(shard)) {
                 this._updateOpenedShardLockList(shard, 1, 0);
                 return this.openedShardTables.get(shard);
             }
@@ -303,7 +299,6 @@ class ShardedTable {
                 newTable.autoIncrement = shardRowCountStep*shardRec.num;
 
             this.openedShardTables.set(shard, newTable);
-            this.openedShardNames.add(shard);
             this._updateOpenedShardLockList(shard, 1, 0);
 
             return newTable;
@@ -556,7 +551,7 @@ class ShardedTable {
         const tailShards = [];
 
         for (const shard of shardsIter) {
-            if (this.openedShardNames.has(shard))
+            if (this.openedShardTables.has(shard))
                 shards.push(shard);
             else
                 tailShards.push(shard);
@@ -590,7 +585,7 @@ class ShardedTable {
         } else {
             if (Array.isArray(query.shards)) {
                 for (const shard of query.shards) {
-                    if (this.shardList.get(shard))
+                    if (this.shardList.has(shard))
                         selectedShards.push(shard);
                 }
             } else if (typeof(query.shards) === 'string') {
@@ -677,7 +672,7 @@ class ShardedTable {
 
                     const listRec = {shard, count: this.autoShardSize - shardRec.count};
 
-                    if (this.openedShardNames.has(shard)) {
+                    if (this.openedShardTables.has(shard)) {
                         opened.push(listRec);
                     } else {
                         a.list.push(listRec);
