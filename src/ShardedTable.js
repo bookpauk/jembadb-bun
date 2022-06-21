@@ -15,7 +15,7 @@ const LockQueue = require('./LockQueue');
 
 const BasicTable = require('./BasicTable');
 
-const shardRowCountStep = 20*1000*1000;//must be greater than 16M
+const shardRowCountStep = 20*1000*1000;//must be greater than 16M, do not change
 const maxFreeShardNumsLength = 100;
 const maxAutoShardListLength = 1000;
 const autoShardName = '___auto';
@@ -80,8 +80,93 @@ class ShardedTable {
             throw new Error('Table has not been opened yet');
     }
 
+    async _cloneTable(srcTablePath, destTablePath, cloneSelf = false, noMeta = false, filter) {
+        await fs.rmdir(destTablePath, { recursive: true });
+        await fs.mkdir(destTablePath, { recursive: true });
+
+        let srcShardListTable = null;
+        let srcMetaTable = null;
+
+        if (cloneSelf) {
+            srcShardListTable = this.shardListTable;
+            srcMetaTable = this.metaTable;
+        } else {
+            srcShardListTable = new BasicTable();
+            await srcShardListTable.open({tablePath: `${srcTablePath}/shards`});
+            srcMetaTable = new BasicTable();
+            await srcMetaTable.open({tablePath: `${srcTablePath}/meta`});
+        }
+
+        const meta = await srcMetaTable.getMeta();
+        await srcMetaTable.close();
+
+        const srcShardList = await srcShardListTable.select({});
+        await srcShardListTable.close();
+
+        const destShardListTable = new BasicTable();
+        await destShardListTable.open({tablePath: `${destTablePath}/shards`});
+
+        const destMetaTable = new BasicTable();
+        await destMetaTable.open({tablePath: `${destTablePath}/meta`});
+        if (!noMeta)
+            await destMetaTable.create(meta);
+        await destMetaTable.close();
+
+        let totalCount = 0;
+        for (const shardRec of srcShardList) {
+            if (shardRec.id === '')
+                continue;
+            
+            const toTablePath = this._shardTablePath(shardRec.num, destTablePath);
+
+            //cloning table
+            if (cloneSelf) {
+                const table = await this._lockShard(shardRec.id);
+                try {
+                    await table.clone({toTablePath, noMeta: true, filter});
+                } finally {
+                    await this._unlockShard(shardRec.id);
+                }
+            } else {
+                const table = new BasicTable();
+                await table.open({tablePath: this._shardTablePath(shardRec.num, srcTablePath)});
+
+                await table.clone({toTablePath, noMeta: true, filter});
+                await table.close();
+            }
+
+            //read cloned table, create meta
+            const destTable = new BasicTable();
+            const query = utils.cloneDeep(this.openQuery);
+            query.tablePath = toTablePath;
+
+            await destTable.open(query);
+            if (!noMeta)
+                await destTable.create(meta);
+
+            const shardCount = await destTable.select({count: true});
+            await destTable.close();
+
+            //save shardRec
+            const count = shardCount[0].count;
+            await destShardListTable.insert({rows: [{id: shardRec.id, num: shardRec.num, count}]});
+            totalCount += count;
+        }
+
+        await destShardListTable.insert({rows: [{id: '', count: totalCount}]});
+        await destShardListTable.close();
+
+        await fs.writeFile(`${destTablePath}/state`, '1');
+        await fs.writeFile(`${destTablePath}/type`, this.type);
+    }
+
     async _recreateTable() {
-        //TODO
+        const tempTablePath = `${this.tablePath}___temporary_recreating`;
+
+        await this._cloneTable(this.tablePath, tempTablePath);
+
+        await fs.rmdir(this.tablePath, { recursive: true });
+        await fs.rename(tempTablePath, this.tablePath);
     }
 
     async _loadMeta() {
@@ -113,11 +198,11 @@ class ShardedTable {
         this._checkTables(); //no await
     }
 
-    _shardTablePath(num) {
+    _shardTablePath(num, path = '') {
         if (num < 1000000)
-            return `${this.tablePath}/s${num.toString().padStart(6, '0')}`;
+            return `${(path ? path : this.tablePath)}/s${num.toString().padStart(6, '0')}`;
         else
-            return `${this.tablePath}/s${num.toString().padStart(12, '0')}`;
+            return `${(path ? path : this.tablePath)}/s${num.toString().padStart(12, '0')}`;
     }
 
     _getFreeShardNum() {
@@ -334,6 +419,7 @@ class ShardedTable {
         tablePath: String,
         cacheSize: Number,
         cacheShards: Number, 1, for sharded table only
+        autoShardSize: Number, 1000000, for sharded table only
         compressed: Number, 0..9
         recreate: Boolean, false,
         autoRepair: Boolean, false,
@@ -361,7 +447,12 @@ class ShardedTable {
             this.cacheShards = query.cacheShards || this.cacheShards;
             this.autoShardSize = query.autoShardSize || this.autoShardSize;
 
-            this.openQuery = query;            
+            this.recreate = query.recreate || false;
+            this.autoRepair = query.autoRepair || false;
+
+            this.openQuery = utils.cloneDeep(query);
+            this.openQuery.recreate = false;
+            this.openQuery.autoRepair = false;
 
             let create = true;
             if (await utils.pathExists(this.tablePath)) {
@@ -789,9 +880,9 @@ class ShardedTable {
                 const duiLock = this._getDUILock(shard);
                 await duiLock.get();
                 try {
+                    let shardRowCount = 0;
                     const rows = shardedRows.get(shard);
 
-                    let shardRowCount = 0;
                     const table = await this._lockShard(shard);
                     try {
                         const insResult = await table.insert({rows});//insert
@@ -847,6 +938,7 @@ class ShardedTable {
             const duiLock = this._getDUILock(shard);
             await duiLock.get();
             try {
+
                 const table = await this._lockShard(shard);
                 try {
                     const updResult = await table.update(query);//update
@@ -892,6 +984,7 @@ class ShardedTable {
             try {
                 let shardRowCount = 0;
                 let delResult = null;
+
                 const table = await this._lockShard(shard);
                 try {
                     delResult = await table.delete(query);//delete
@@ -950,6 +1043,14 @@ class ShardedTable {
     result = {}
     */
     async clone(query = {}) {
+        this._checkErrors();
+
+        if (!query.toTablePath || typeof(query.toTablePath) !== 'string')
+            throw new Error(`'query.toTablePath' parameter is required`);
+
+        await this._cloneTable(this.tablePath, query.toTablePath, true, query.noMeta, query.filter);
+
+        return {};
     }
 
     async _saveState(state) {
