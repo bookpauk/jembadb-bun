@@ -112,6 +112,7 @@ class ShardedTable {
             await destMetaTable.create(meta);
         await destMetaTable.close();
 
+        const query = utils.cloneDeep(this.openQuery);
         let totalCount = 0;
         for (const shardRec of srcShardList) {
             if (shardRec.id === '')
@@ -119,7 +120,7 @@ class ShardedTable {
             
             const toTablePath = this._shardTablePath(shardRec.num, destTablePath);
 
-            //cloning table
+            //cloning shard
             if (cloneSelf) {
                 const table = await this._lockShard(shardRec.id);
                 try {
@@ -129,15 +130,15 @@ class ShardedTable {
                 }
             } else {
                 const table = new BasicTable();
-                await table.open({tablePath: this._shardTablePath(shardRec.num, srcTablePath)});
+                query.tablePath = this._shardTablePath(shardRec.num, srcTablePath);
+                await table.open(query);
 
                 await table.clone({toTablePath, noMeta: true, filter});
                 await table.close();
             }
 
-            //read cloned table, create meta
+            //read cloned shard, create meta
             const destTable = new BasicTable();
-            const query = utils.cloneDeep(this.openQuery);
             query.tablePath = toTablePath;
 
             await destTable.open(query);
