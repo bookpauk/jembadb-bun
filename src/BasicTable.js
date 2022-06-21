@@ -895,14 +895,14 @@ class BasicTable {
     result = {}
     */
     async clone(query = {}) {
+        this._checkErrors();
+
         if (this.inMemory) {
             throw new Error(`inMemory table can't be cloned`);
         }
 
         if (!query.toTablePath || typeof(query.toTablePath) !== 'string')
             throw new Error(`'query.toTablePath' parameter is required`);
-
-        this._checkErrors();
 
         await this.lock.get();
         try {
