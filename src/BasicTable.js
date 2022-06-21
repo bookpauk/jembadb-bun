@@ -68,7 +68,7 @@ class BasicTable {
 
         // '(r) => true' || 'nodata',
         let filterFunc = null;
-        let nodata = (filter === 'nodata');
+        const nodata = (filter === 'nodata');
         if (filter && !nodata) {
             filterFunc = new Function(`'use strict'; return ${filter}`)();
         } else {

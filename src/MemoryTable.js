@@ -34,7 +34,7 @@ class MemoryTable extends BasicTable {
             }
 
             let filterFunc = null;
-            let nodata = (query.filter === 'nodata');
+            const nodata = (query.filter === 'nodata');
             if (query.filter && !nodata) {
                 filterFunc = new Function(`'use strict'; return ${query.filter}`)();
             } else {
