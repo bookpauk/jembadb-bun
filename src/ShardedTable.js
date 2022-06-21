@@ -98,10 +98,12 @@ class ShardedTable {
         }
 
         const meta = await srcMetaTable.getMeta();
-        await srcMetaTable.close();
+        if (!cloneSelf)
+            await srcMetaTable.close();
 
         const srcShardList = await srcShardListTable.select({});
-        await srcShardListTable.close();
+        if (!cloneSelf)
+            await srcShardListTable.close();
 
         const destShardListTable = new BasicTable();
         await destShardListTable.open({tablePath: `${destTablePath}/shards`});
