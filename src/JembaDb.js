@@ -2,8 +2,9 @@
 
 const fs = require('fs').promises;
 
-const BasicTable = require('./BasicTable');
 const MemoryTable = require('./MemoryTable');
+const ShardedTable = require('./ShardedTable');
+const BasicTable = require('./BasicTable');
 
 const LockQueue = require('./LockQueue');
 const utils = require('./utils');
@@ -387,6 +388,17 @@ class JembaDb {
         }
     }
 
+    async _getTableType(query) {
+        let result = 'basic';
+
+        const typePath = `${this.dbPath}/${query.table}/type`;
+        if (await utils.pathExists(typePath)) {
+            result = await fs.readFile(typePath, 'utf8');
+        }
+
+        return result;
+    }
+
     /*
     query = {
     (!) table: 'tableName',
@@ -409,13 +421,19 @@ class JembaDb {
         if (!query.table)
             throw new Error(`'query.table' parameter is required`);
 
-        if (await this.tableExists({table: query.table}) || query.create) {
+        const tableExists = await this.tableExists({table: query.table});
+        if (tableExists || query.create) {
             let tableInstance = this.table.get(query.table);
 
             if (!tableInstance || !tableInstance.opened) {
+                let type = query.type;
+                if (tableExists)
+                    type = await this._getTableType(query);
 
-                if (query.type === 'memory') {
+                if (type === 'memory') {
                     tableInstance = new MemoryTable();
+                } else if (type === 'sharded') {
+                    tableInstance = new ShardedTable();
                 } else {
                     tableInstance = new BasicTable();
                 }
