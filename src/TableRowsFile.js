@@ -42,17 +42,20 @@ class TableRowsFile {
 
     //--- rows interface
     async getRow(id) {
-        let block = this.blockList.get(this.blockIndex.get(id));
+        const block = this.blockList.get(this.blockIndex.get(id));
 
-        if (block) {
-            if (!block.rows) {
-                await this.loadBlock(block);
-            }
-
-            this.unloadBlocksIfNeeded();//no await
-            return block.rows.get(id);
+        if (!block) {
+            return;
         }
-        return;
+
+        if (block.rows) {
+            return block.rows.get(id);
+        } else {
+            await this.loadBlock(block);
+            const result = block.rows.get(id);
+            this.unloadBlocksIfNeeded();
+            return result;
+        }
     }
 
     setRow(id, row, rowStr, deltaStep) {
@@ -163,44 +166,27 @@ class TableRowsFile {
         return block.index;
     }
 
-    async unloadBlocksIfNeeded() {
-        this.needUnload = true;
-        if (this.unloadingBlocks)
+    unloadBlocksIfNeeded() {
+        if (this.loadedBlocks.length <= this.loadedBlocksCount)
             return;
-
-        this.unloadingBlocks = true;
-        try {
-            while (this.needUnload) {
-                this.needUnload = false;
-                if (this.destroyed)
-                    return;
-
-                await utils.sleep(10);
-
-                //check loaded
-                let missed = new Map();
-                while (this.loadedBlocks.length >= this.loadedBlocksCount) {
-                    const index = this.loadedBlocks.shift();
-                    if (index >= this.lastSavedBlockIndex) {
-                        missed.set(index, 1);
-                        continue;
-                    }
-                    const block = this.blockList.get(index);
-
-                    if (block) {
-                        block.rows = null;
-//console.log(`unloaded block ${block.index}`);
-                    }
-
-                    if (this.destroyed)
-                        return;
-                }
-                
-                this.loadedBlocks = this.loadedBlocks.concat(Array.from(missed.keys()));
+        
+        //check loaded
+        let missed = new Map();//sequence important, Map instead Set
+        while (this.loadedBlocks.length > this.loadedBlocksCount) {
+            const index = this.loadedBlocks.shift();
+            if (index >= this.lastSavedBlockIndex) {
+                missed.set(index, 1);
+                continue;
             }
-        } finally {
-            this.unloadingBlocks = false;
+            const block = this.blockList.get(index);
+
+            if (block) {
+                block.rows = null;
+//console.log(`unloaded block ${block.index}`);
+            }
         }
+
+        this.loadedBlocks = this.loadedBlocks.concat(Array.from(missed.keys()));
     }
 
     async loadFile(filePath) {
@@ -494,7 +480,7 @@ class TableRowsFile {
 
         //blocks finalization
         await this.finalizeBlocks();
-        this.unloadBlocksIfNeeded();//no await
+        this.unloadBlocksIfNeeded();
 
         //dumps if needed
         await this.dumpMaps();
