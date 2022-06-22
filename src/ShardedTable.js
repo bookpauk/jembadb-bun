@@ -687,26 +687,28 @@ class ShardedTable {
     }
 
     _parseQueryShards(query) {
-        let selectedShards = [];
+        let selectedShards = new Set;
         if (!query.shards) {
-            selectedShards = Array.from(this.shardList.keys());
+            selectedShards = this.shardList.keys();
         } else {
             if (Array.isArray(query.shards)) {
                 for (const shard of query.shards) {
-                    if (this.shardList.has(shard))
-                        selectedShards.push(shard);
+                    if (!selectedShards.has(shard) && this.shardList.has(shard)) {
+                        selectedShards.add(shard);
+                    }
                 }
             } else if (typeof(query.shards) === 'string') {
                 const shardTestFunc = new Function(`'use strict'; return ${query.shards}`)();
                 for (const shard of this.shardList.keys()) {
                     if (shardTestFunc(shard))
-                        selectedShards.push(shard);
+                        selectedShards.add(shard);
                 }
             } else {
                 throw new Error('Uknown query.shards param type');
             }
         }
-        //opened shards first
+
+        //opened shards first, to array
         selectedShards = this._getOpenedShardsFirst(selectedShards);
         return selectedShards;
     }
