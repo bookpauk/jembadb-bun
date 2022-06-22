@@ -169,13 +169,13 @@ class TableRowsFile {
     unloadBlocksIfNeeded() {
         if (this.loadedBlocks.length <= this.loadedBlocksCount)
             return;
-        
+
         //check loaded
-        let missed = new Map();//sequence important, Map instead Set
+        let missed = new Set();
         while (this.loadedBlocks.length > this.loadedBlocksCount) {
             const index = this.loadedBlocks.shift();
             if (index >= this.lastSavedBlockIndex) {
-                missed.set(index, 1);
+                missed.add(index);
                 continue;
             }
             const block = this.blockList.get(index);
@@ -186,7 +186,7 @@ class TableRowsFile {
             }
         }
 
-        this.loadedBlocks = this.loadedBlocks.concat(Array.from(missed.keys()));
+        this.loadedBlocks = this.loadedBlocks.concat(Array.from(missed));
     }
 
     async loadFile(filePath) {
