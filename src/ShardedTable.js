@@ -395,25 +395,33 @@ class ShardedTable {
                     num: this._getFreeShardNum(),
                     count: 0,
                 };
-
-                await this._saveShardRec(shardRec);
-                this.shardList.set(shard, shardRec);
             }
 
-            const newTable = new BasicTable();
+            const table = new BasicTable();
 
             const query = utils.cloneDeep(this.openQuery);
             query.tablePath = this._shardTablePath(shardRec.num);
 
-            await newTable.open(query);
+            if (isNew) {
+                await fs.rmdir(query.tablePath, { recursive: true });
 
-            if (isNew)
-                newTable.autoIncrement = shardRowCountStep*shardRec.num;
+                await table.open(query);
 
-            this.openedShardTables.set(shard, newTable);
+                table.autoIncrement = shardRowCountStep*shardRec.num;
+
+                const meta = await this.metaTable.getMeta();
+                await table.create(meta);
+
+                this.shardList.set(shard, shardRec);
+                await this._saveShardRec(shardRec);
+            } else {
+                await table.open(query);
+            }
+
+            this.openedShardTables.set(shard, table);
             this._updateOpenedShardLockList(shard, 1, 0);
 
-            return newTable;
+            return table;
         } finally {
             shdLock.ret();
         }
