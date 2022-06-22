@@ -3,6 +3,7 @@
 const fs = require('fs').promises;
 const path = require('path');
 const utils = require('./utils');
+const LockQueue = require('./LockQueue');
 
 const maxBlockSize = 1024*1024;//bytes
 
@@ -16,6 +17,7 @@ class TableRowsFile {
         this.loadedBlocksCount = (this.loadedBlocksCount <= 0 ? 0 : this.loadedBlocksCount);
         this.compressed = compressed || 0;
 
+        this.fileLockMap = new Map();
         this.blockIndex = new Map();
         this.currentBlockIndex = 0;
         this.lastSavedBlockIndex = 0;
@@ -40,7 +42,7 @@ class TableRowsFile {
 
     //--- rows interface
     async getRow(id) {
-        const block = this.blockList.get(this.blockIndex.get(id));
+        let block = this.blockList.get(this.blockIndex.get(id));
 
         if (block) {
             if (!block.rows) {
@@ -103,6 +105,17 @@ class TableRowsFile {
             this.deltas.set(deltaStep, delta);
             return delta;
         }
+    }
+
+    getFileLock(fileName) {
+        let queue = this.fileLockMap.get(fileName);
+        
+        if (!queue) {
+            queue = new LockQueue(100);
+            this.fileLockMap.set(fileName, queue);
+        }
+
+        return queue;
     }
 
     createNewBlock() {
@@ -245,13 +258,20 @@ class TableRowsFile {
 
     async loadBlock(block) {
 //console.log(`start load block ${block.index}`);
-        if (!block.rows) {
-            const arr = await this.loadFile(this.blockRowsFilePath(block.index));
+        const fileName = this.blockRowsFilePath(block.index);
+        const fLock = this.getFileLock(fileName);
+        await fLock.get();
+        try {
+            if (!block.rows) {
+                const arr = await this.loadFile(fileName);
 
-            block.rows = new Map(arr);
+                block.rows = new Map(arr);
 
-            this.loadedBlocks.push(block.index);
-//console.log(`loaded block ${block.index}`);
+                this.loadedBlocks.push(block.index);
+    //console.log(`loaded block ${block.index}`);
+            }
+        } finally {
+            fLock.ret();
         }
     }
 
@@ -483,8 +503,15 @@ class TableRowsFile {
         if (delta.delFiles) {
             for (const fileName of delta.delFiles) {
 //console.log(`delete ${fileName}`);                
-                if (await utils.pathExists(fileName))
-                    await fs.unlink(fileName);
+                const fLock = this.getFileLock(fileName);
+                await fLock.get();
+                try {
+                    if (await utils.pathExists(fileName))
+                        await fs.unlink(fileName);
+                    this.fileLockMap.delete(fileName);
+                } finally {
+                    fLock.ret();
+                }
             }
         }
 
