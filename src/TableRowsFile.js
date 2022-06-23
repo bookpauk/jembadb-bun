@@ -186,6 +186,10 @@ class TableRowsFile {
         while (this.loadedBlocks.length > this.loadedBlocksCount) {
             const index = this.loadedBlocks.shift();
 
+            //additional check, just in case
+            if (index >= this.lastSavedBlockIndex)
+                continue;
+
             const block = this.blockList.get(index);
 
             if (block) {
@@ -260,7 +264,7 @@ class TableRowsFile {
                 block.rows = new Map(arr);
 
                 this.loadedBlocks.push(block.index);
-    //console.log(`loaded block ${block.index}`);
+//console.log(`loaded block ${block.index}`, this.lastSavedBlockIndex, this.currentBlockIndex);
             }
         } finally {
             fLock.ret();
@@ -368,12 +372,6 @@ class TableRowsFile {
 
     async saveDelta(deltaStep) {
         const delta = this.getDelta(deltaStep);
-
-        //lastSavedBlockIndex
-        const len = delta.blockRows.length;
-        if (len) {
-            this.lastSavedBlockIndex = delta.blockRows[len - 1][0];
-        }
 
         //check all blocks fragmentation & defragment if needed
         if (!this.defragCandidates)
@@ -484,6 +482,12 @@ class TableRowsFile {
         if (buf.length)
             await this.fd.blockRows.write(buf.join(',') + ',');
 
+        //lastSavedBlockIndex
+        const len = delta.blockRows.length;
+        if (len) {
+            this.lastSavedBlockIndex = delta.blockRows[len - 1][0];
+        }
+
         //blocks finalization
         await this.finalizeBlocks();
         this.unloadBlocksIfNeeded();
@@ -581,8 +585,11 @@ class TableRowsFile {
 
         this.lastSavedBlockIndex = this.currentBlockIndex;
         const currentBlock = this.blockList.get(this.currentBlockIndex);
-        if (currentBlock)
+        if (currentBlock) {
             await this.loadBlock(currentBlock);
+            this.newBlocks.push(this.currentBlockIndex);
+            this.loadedBlocks = [];
+        }
 
         this.blocksNotFinalized = new Map();
         for (const block of this.blockList.values()) {
