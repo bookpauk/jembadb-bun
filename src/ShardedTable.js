@@ -736,10 +736,8 @@ class ShardedTable {
         const queryHasPersistent = utils.hasProp(query, 'persistent');
 
         const shardResult = [];
-        if (query.count) {
-            shardResult.push({count: this.infoShard.count});
-        }
 
+        let totalCount = 0;
         //select from shards
         for (const shard of selectedShards) {
             const table = await this._lockShard(shard);
@@ -754,14 +752,20 @@ class ShardedTable {
                 const rows = await table.select(query);//select
 
                 if (query.count) {
-                    for (const row of rows)
+                    for (const row of rows) {
                         row.shard = shard;
+                        totalCount += row.count;
+                    }
                 }
 
                 shardResult.push(rows);
             } finally {
                 await this._unlockShard(shard);
             }
+        }
+
+        if (query.count) {
+            shardResult.unshift({count: totalCount});
         }
 
         let result = [].concat(...shardResult);
