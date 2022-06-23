@@ -25,6 +25,7 @@ class TableRowsFile {
         this.blockSetDefrag = new Set();
         this.blocksNotFinalized = new Map();//indexes of blocks
         this.loadedBlocks = [];
+        this.newBlocks = [];
         this.deltas = new Map();
 
         this.destroyed = false;
@@ -133,7 +134,7 @@ class TableRowsFile {
             final: false,
         };
         this.blockList.set(this.currentBlockIndex, block);
-        this.loadedBlocks.push(this.currentBlockIndex);
+        this.newBlocks.push(this.currentBlockIndex);
         this.blocksNotFinalized.set(this.currentBlockIndex, 1);
 
         return block;
@@ -167,17 +168,24 @@ class TableRowsFile {
     }
 
     unloadBlocksIfNeeded() {
+        const nb = [];
+        for (const index of this.newBlocks) {
+            if (index < this.lastSavedBlockIndex) {
+                this.loadedBlocks.push(index);
+            } else {
+                nb.push(index);
+            }
+        }
+
+        this.newBlocks = nb;
+
         if (this.loadedBlocks.length <= this.loadedBlocksCount)
             return;
 
         //check loaded
-        let missed = new Set();
         while (this.loadedBlocks.length > this.loadedBlocksCount) {
             const index = this.loadedBlocks.shift();
-            if (index >= this.lastSavedBlockIndex) {
-                missed.add(index);
-                continue;
-            }
+
             const block = this.blockList.get(index);
 
             if (block) {
@@ -185,8 +193,6 @@ class TableRowsFile {
 //console.log(`unloaded block ${block.index}`);
             }
         }
-
-        this.loadedBlocks = this.loadedBlocks.concat(Array.from(missed));
     }
 
     async loadFile(filePath) {
