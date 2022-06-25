@@ -551,8 +551,17 @@ class BasicTable {
 
         //selection
         let found = [];
-        if (!query.where && !query.distinct && !query.group && query.count) {//minor optimization
-            found = [{count: this.rowsInterface.getAllIdsSize()}];
+        if (query.count && !query.distinct && !query.group) {//optimization
+            if (query.where) {
+                let count = 0;
+                for (const id of ids) {
+                    if (this.rowsInterface.hasRow(id))
+                        count++;
+                }
+                found = [{count}];
+            } else {
+                found = [{count: this.rowsInterface.getAllIdsSize()}];
+            }
         } else {//full running
             for (const id of ids) {
                 const row = await this.rowsInterface.getRow(id);
