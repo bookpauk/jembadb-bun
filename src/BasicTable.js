@@ -447,6 +447,7 @@ class BasicTable {
     /*
     result = {
         type: String,
+        count: Number,
         flag:  Array, [{name: 'flag1', check: '(r) => r.id > 10'}, ...]
         hash:  Array, [{field: 'field1', type: 'string', depth: 11, allowUndef: false}, ...]
         index: Array, [{field: 'field1', type: 'string', depth: 11, allowUndef: false}, ...]
@@ -457,6 +458,7 @@ class BasicTable {
 
         return {
             type: this.type,
+            count: this.rowsInterface.getAllIdsSize(),
             flag: this.reducer._listFlag(),
             hash: this.reducer._listHash(),
             index: this.reducer._listIndex(),
