@@ -42,6 +42,10 @@ class TableRowsFile {
     }
 
     //--- rows interface
+    hasRow(id) {
+        return this.blockIndex.has(id);
+    }
+
     async getRow(id) {
         const block = this.blockList.get(this.blockIndex.get(id));
 

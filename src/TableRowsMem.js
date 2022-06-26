@@ -6,6 +6,10 @@ class TableRowsMem {
     }
 
     //--- rows interface
+    hasRow(id) {
+        return this.rows.has(id);
+    }
+
     async getRow(id) {
         return this.rows.get(id);
     }

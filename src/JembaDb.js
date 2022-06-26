@@ -586,7 +586,7 @@ class JembaDb {
                 }
             }
         }
-        return result;
+        return utils.cloneDeep(result);
     }
 
     /*

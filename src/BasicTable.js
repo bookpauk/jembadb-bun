@@ -447,6 +447,7 @@ class BasicTable {
     /*
     result = {
         type: String,
+        count: Number,
         flag:  Array, [{name: 'flag1', check: '(r) => r.id > 10'}, ...]
         hash:  Array, [{field: 'field1', type: 'string', depth: 11, allowUndef: false}, ...]
         index: Array, [{field: 'field1', type: 'string', depth: 11, allowUndef: false}, ...]
@@ -457,6 +458,7 @@ class BasicTable {
 
         return {
             type: this.type,
+            count: this.rowsInterface.getAllIdsSize(),
             flag: this.reducer._listFlag(),
             hash: this.reducer._listHash(),
             index: this.reducer._listIndex(),
@@ -549,8 +551,17 @@ class BasicTable {
 
         //selection
         let found = [];
-        if (!query.where && !query.distinct && !query.group && query.count) {//minor optimization
-            found = [{count: this.rowsInterface.getAllIdsSize()}];
+        if (query.count && !query.distinct && !query.group) {//optimization
+            if (query.where) {
+                let count = 0;
+                for (const id of ids) {
+                    if (this.rowsInterface.hasRow(id))
+                        count++;
+                }
+                found = [{count}];
+            } else {
+                found = [{count: this.rowsInterface.getAllIdsSize()}];
+            }
         } else {//full running
             for (const id of ids) {
                 const row = await this.rowsInterface.getRow(id);
