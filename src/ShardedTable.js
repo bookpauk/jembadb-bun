@@ -656,6 +656,7 @@ class ShardedTable {
     async getMeta() {
         const result = await this.metaTable.getMeta();
         result.type = this.type;
+        result.count = this.infoShard.count;
         result.shardList = [];
         for (const shardRec of this.shardList.values()) {
             const lockRec = this.openedShardLockList.get(shardRec.id);
@@ -668,7 +669,6 @@ class ShardedTable {
                 count: shardRec.count,
             });
         }
-        result.count = this.infoShard.count;
 
         return result;
     }
