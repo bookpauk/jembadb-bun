@@ -17,7 +17,7 @@ class BasicTable {
     constructor() {
         this.type = 'basic';
 
-        this.rowsInterface = new TableRowsMem();
+        this.rowsInterface = null;
 
         this.autoIncrement = 0;
         this.fileError = '';
@@ -226,6 +226,7 @@ class BasicTable {
                 throw new Error('Table instance has been destroyed. Please create a new one.');
 
             if (this.inMemory) {
+                this.rowsInterface = new TableRowsMem();
                 this.reducer = new TableReducer(this.inMemory, '', 0, this.rowsInterface);
             } else {
                 if (!query.tablePath)
