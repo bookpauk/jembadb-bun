@@ -20,6 +20,7 @@ closeAll
 tableExists
 getDbInfo
 getDbSize
+setMonitoring
 
 select
 insert
@@ -40,7 +41,8 @@ class JembaDbThread {
         const apiMethods = [
             //lock, unlock,
             'create', 'drop', 'truncate', 'clone', 'open', 'openAll', 'close', 'closeAll',
-            'tableExists', 'getDbInfo', 'getDbSize', 'select', 'insert', 'update', 'delete',
+            'tableExists', 'getDbInfo', 'getDbSize', 'setMonitoring',
+            'select', 'insert', 'update', 'delete',
             'markCorrupted'
         ];
 
