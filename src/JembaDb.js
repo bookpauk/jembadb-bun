@@ -26,6 +26,7 @@ closeAll
 tableExists
 getDbInfo
 getDbSize
+setMonitoring
 
 select
 insert
@@ -103,6 +104,11 @@ class JembaDb {
     async unlock() {
         if (!this.opened)
             return;
+
+        if (this.monCleanTimer) {
+            clearInterval(this.monCleanTimer);
+            this.monCleanTimer = null;
+        }
 
         await this.closeAll();
 
@@ -575,6 +581,13 @@ class JembaDb {
         const tables = await this._getTableList();
 
         const result = {dbPath: this.dbPath};
+
+        result.monitoring = {
+            enabled: this.monitoringEnabled,
+            table: this.monitoringTable,
+            interval: this.monitoringInterval,
+        };
+
         for (const table of tables) {
             if (!query.table || (query.table && table == query.table)) {
                 const tableInstance = this.table.get(table);
@@ -630,6 +643,165 @@ class JembaDb {
         }
 
         return result;
+    }
+
+    /*
+    query = {
+        enable: Boolean, default false
+        table: 'tableName', default '__monitoring'
+        interval: Number, minutes, default 15
+    }
+    result = {}
+    */
+    async setMonitoring(query = {}) {
+        const apiMethods = [
+            'create', 'drop', 'truncate', 'clone', 'open', 'openAll', 'close', 'closeAll',
+            'select', 'insert', 'update', 'delete',
+        ];
+
+        if (query.interval && typeof(query.interval) != 'number')
+            throw new Error(`query.interval must be of type 'number'`);
+
+        this.monitoringInterval = query.interval || 15;
+
+        if (!this.monitoringTable)
+            this.monitoringTable = '__monitoring';
+
+        if (!this.monitoringId)
+            this.monitoringId = 1;
+
+        if (query.table && typeof(query.table) != 'string')
+            throw new Error(`query.table must be of type 'string'`);
+
+        if (query.enable) {
+            if (!this.monitoringEnabled) {
+
+                if (query.table)
+                    this.monitoringTable = query.table;
+
+                //close monitoring table
+                if (await this.tableExists({table: this.monitoringTable}))
+                    await this.close({table: this.monitoringTable});
+
+                //create monitoring table
+                /* records:
+                    {
+                        id: Number,
+                        method: String,
+                        query: String,
+                        error: String,
+                        timeBegin: Number,
+                        timeEnd: Number,
+                    }
+                */
+                await this.create({
+                    table: this.monitoringTable,
+                    create: true,
+                    type: 'memory',
+                    index: {field: 'timeEnd', type: 'number'}
+                });
+
+                //save original methods
+                if (!this.origMethods) {
+                    this.origMethods = {};
+                    for (const method of apiMethods)
+                        this.origMethods[method] = this[method];
+                }
+
+                //create monitoring methods
+                if (!this.monMethods) {
+                    this.monMethods = {};
+                    for (const method of apiMethods) {
+                        this.monMethods[method] = (async(query) => {
+                            let monTableInstance;
+                            let monRec = {};
+                            let error = '';
+
+                            if (this.monitoringEnabled) {
+                                monTableInstance = this.table.get(this.monitoringTable);
+                                monTableInstance = (monTableInstance && !monTableInstance.closed ? monTableInstance : undefined);
+
+                                monRec = {
+                                    id: this.monitoringId++,
+                                    method,
+                                    query,
+                                    error,
+                                    timeBegin: Date.now(),
+                                    timeEnd: 0,
+                                };
+
+                                if (monTableInstance) {
+                                    await monTableInstance.insert({rows: [monRec]});
+                                }
+                            }
+
+                            try {
+                                return await this.origMethods[method](query);//original
+                            } catch (e) {
+                                error = e.message;
+                            } finally {
+                                if (this.monitoringEnabled) {
+                                    monTableInstance = this.table.get(this.monitoringTable);
+                                    monTableInstance = (monTableInstance && !monTableInstance.closed ? monTableInstance : undefined);
+                                    if (monTableInstance) {
+                                        monRec.error = error;
+                                        monRec.timeEnd = Date.now();
+
+                                        await monTableInstance.insert({replace: true, rows: [monRec]});
+                                    }
+                                }
+                            }
+                        }).bind(this);
+                    }
+                }
+
+                //change original methods to monitoring
+                for (const method of apiMethods)
+                    this[method] = this.monMethods[method];
+
+                //clean timeout
+                if (this.monCleanTimer) {
+                    clearInterval(this.monCleanTimer);
+                    this.monCleanTimer = setInterval(async() => {
+                        if (this.monCleaning || !this.monitoringEnabled)
+                            return;
+
+                        this.monCleaning = true;
+                        try {
+                            let monTableInstance = this.table.get(this.monitoringTable);
+                            monTableInstance = (monTableInstance && !monTableInstance.closed ? monTableInstance : undefined);
+
+                            if (monTableInstance) {
+                                const delDate = new Date();
+                                delDate.setMinutes(delDate.getMinutes - this.monitoringInterval);
+
+                                await monTableInstance.delete({where: `@@index('timeEnd', 0, ${this.esc(delDate.getTime())})`});
+                            }
+                        } finally {
+                            this.monCleaning = false;
+                        }
+                    }, 60*1000);//every minute
+                }
+
+                this.monitoringEnabled = true;
+            } else {
+                throw new Error('Query monitoring already enabled');
+            }
+        } else if (this.monitoringEnabled) {
+            this.monitoringEnabled = false;
+
+            if (this.monCleanTimer) {
+                clearInterval(this.monCleanTimer);
+                this.monCleanTimer = null;
+            }
+
+            //change monitoring methods to original
+            for (const method of apiMethods)
+                this[method] = this.origMethods[method];
+
+            //close monitoring table
+            await this.close({table: this.monitoringTable});
+        }
     }
 
     /*
@@ -707,6 +879,7 @@ class JembaDb {
     /*
     query = {
     (!) table: 'tableName',
+        ignore: Boolean,
         replace: Boolean,
         shardGen: '(r) => r.date',//for sharded table only
     (!) rows: Array,
@@ -714,6 +887,7 @@ class JembaDb {
     result = {
     (!) inserted: Number,
     (!) replaced: Number,
+    (!) lastInsertId: Number,
     }
     */
     async insert(query = {}) {
