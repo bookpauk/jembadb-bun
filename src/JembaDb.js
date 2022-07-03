@@ -777,13 +777,18 @@ class JembaDb {
 
                         if (monTableInstance) {
                             const delDate = new Date();
-                            delDate.setMinutes(delDate.getMinutes - this.monitoringInterval);
-                            await monTableInstance.delete({where: `@@index('timeEnd', 0, ${this.esc(delDate.getTime())})`});
+                            delDate.setMinutes(delDate.getMinutes() - this.monitoringInterval);
+
+                            try {
+                                await monTableInstance.delete({where: `@@index('timeEnd', 0, ${this.esc(delDate.getTime())})`});
+                            } catch (e) {
+                                //silent
+                            }
                         }
                     } finally {
                         this.monCleaning = false;
                     }
-                }, 1);//every minute
+                }, 60*1000);//every minute
 
                 this.monitoringEnabled = true;
             } else {
