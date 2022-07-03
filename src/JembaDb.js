@@ -705,14 +705,14 @@ class JembaDb {
                 if (!this.origMethods) {
                     this.origMethods = {};
                     for (const method of apiMethods)
-                        this.origMethods[method] = this[method];
+                        this.origMethods[method] = this[method].bind(this);
                 }
 
                 //create monitoring methods
                 if (!this.monMethods) {
                     this.monMethods = {};
                     for (const method of apiMethods) {
-                        this.monMethods[method] = (async(query) => {
+                        this.monMethods[method] = (async(methodQuery) => {
                             let monTableInstance;
                             let monRec = {};
                             let error = '';
@@ -724,7 +724,7 @@ class JembaDb {
                                 monRec = {
                                     id: this.monitoringId++,
                                     method,
-                                    query,
+                                    query: methodQuery,
                                     error,
                                     timeBegin: Date.now(),
                                     timeEnd: 0,
@@ -736,9 +736,10 @@ class JembaDb {
                             }
 
                             try {
-                                return await this.origMethods[method](query);//original
+                                return await this.origMethods[method](methodQuery);//original
                             } catch (e) {
                                 error = e.message;
+                                throw e;
                             } finally {
                                 if (this.monitoringEnabled) {
                                     monTableInstance = this.table.get(this.monitoringTable);
@@ -762,34 +763,33 @@ class JembaDb {
                 //clean timeout
                 if (this.monCleanTimer) {
                     clearInterval(this.monCleanTimer);
-                    this.monCleanTimer = setInterval(async() => {
-                        if (this.monCleaning || !this.monitoringEnabled)
-                            return;
-
-                        this.monCleaning = true;
-                        try {
-                            let monTableInstance = this.table.get(this.monitoringTable);
-                            monTableInstance = (monTableInstance && !monTableInstance.closed ? monTableInstance : undefined);
-
-                            if (monTableInstance) {
-                                const delDate = new Date();
-                                delDate.setMinutes(delDate.getMinutes - this.monitoringInterval);
-
-                                await monTableInstance.delete({where: `@@index('timeEnd', 0, ${this.esc(delDate.getTime())})`});
-                            }
-                        } finally {
-                            this.monCleaning = false;
-                        }
-                    }, 60*1000);//every minute
+                    this.monCleanTimer = null;
                 }
+
+                this.monCleanTimer = setInterval(async() => {
+                    if (this.monCleaning || !this.monitoringEnabled)
+                        return;
+
+                    this.monCleaning = true;
+                    try {
+                        let monTableInstance = this.table.get(this.monitoringTable);
+                        monTableInstance = (monTableInstance && !monTableInstance.closed ? monTableInstance : undefined);
+
+                        if (monTableInstance) {
+                            const delDate = new Date();
+                            delDate.setMinutes(delDate.getMinutes - this.monitoringInterval);
+                            await monTableInstance.delete({where: `@@index('timeEnd', 0, ${this.esc(delDate.getTime())})`});
+                        }
+                    } finally {
+                        this.monCleaning = false;
+                    }
+                }, 1);//every minute
 
                 this.monitoringEnabled = true;
             } else {
                 throw new Error('Query monitoring already enabled');
             }
         } else if (this.monitoringEnabled) {
-            this.monitoringEnabled = false;
-
             if (this.monCleanTimer) {
                 clearInterval(this.monCleanTimer);
                 this.monCleanTimer = null;
@@ -798,6 +798,8 @@ class JembaDb {
             //change monitoring methods to original
             for (const method of apiMethods)
                 this[method] = this.origMethods[method];
+
+            this.monitoringEnabled = false;
 
             //close monitoring table
             await this.close({table: this.monitoringTable});
