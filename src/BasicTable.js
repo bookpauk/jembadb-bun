@@ -616,12 +616,14 @@ class BasicTable {
 
     /*
     query = {
+        ignore: Boolean,
         replace: Boolean,
     (!) rows: Array,
     }
     result = {
     (!) inserted: Number,
     (!) replaced: Number,
+    (!) lastInsertId: Number,
     }
     */
     async insert(query = {}) {
@@ -629,23 +631,28 @@ class BasicTable {
 
         await this.lock.get();
         try {
+            if (query.ignore && query.replace)
+                throw new Error(`One of query.ignore or query.replace params expected, but not both`);
+
             if (!Array.isArray(query.rows)) {
                 throw new Error('query.rows must be an array');
             }
 
-            const newRows = utils.cloneDeep(query.rows);
+            const newRowsSrc = utils.cloneDeep(query.rows);
             const replace = query.replace;
+            const ignore = query.ignore;
 
             //autoIncrement correction
-            for (const newRow of newRows) {
+            for (const newRow of newRowsSrc) {
                 if (typeof(newRow.id) === 'number' && newRow.id >= this.autoIncrement)
                     this.autoIncrement = newRow.id + 1;
             }
 
+            const newRows = [];
             const oldRows = [];
             const newRowsStr = [];
             //checks
-            for (const newRow of newRows) {
+            for (const newRow of newRowsSrc) {
                 if (newRow.id === undefined) {
                     newRow.id = this.autoIncrement;
                     this.autoIncrement++;
@@ -659,14 +666,19 @@ class BasicTable {
                 const oldRow = await this.rowsInterface.getRow(newRow.id);
 
                 if (!replace && oldRow) {
-                    throw new Error(`Record id:${newRow.id} already exists`);
+                    if (ignore) {
+                        continue;
+                    } else {
+                        throw new Error(`Record id:${newRow.id} already exists`);
+                    }
                 }
 
+                newRows.push(newRow);
                 oldRows.push((oldRow ? oldRow : {}));
                 newRowsStr.push(JSON.stringify(newRow));//because of stringify errors
             }
 
-            const result = {inserted: 0, replaced: 0};
+            const result = {inserted: 0, replaced: 0, lastInsertId: -1};
             this.deltaStep++;
             try {
                 //reducer
@@ -679,6 +691,8 @@ class BasicTable {
                     const oldRow = oldRows[i];
 
                     this.rowsInterface.setRow(newRow.id, newRow, newRowStr, this.deltaStep);
+
+                    result.lastInsertId = newRow.id;
 
                     if (oldRow.id !== undefined)
                         result.replaced++;

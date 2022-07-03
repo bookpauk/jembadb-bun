@@ -851,6 +851,7 @@ class ShardedTable {
     result = {
     (!) inserted: Number,
     (!) replaced: Number,//always 0
+    (!) lastInsertId: Number,
     (!) shardList: [{shard: 'name', inserted: Number}]
     }
     */
@@ -895,7 +896,7 @@ class ShardedTable {
                 r.push(row);
             }
 
-            const result = {inserted: 0, replaced: 0, shardList: []};
+            const result = {inserted: 0, replaced: 0, lastInsertId: -1, shardList: []};
 
             //opened shards first
             const shards = this._getOpenedShardsFirst(shardedRows.keys());
@@ -913,7 +914,10 @@ class ShardedTable {
                         const insResult = await table.insert({rows});//insert
 
                         this.changedTables.push(table);
+                        
                         result.inserted += insResult.inserted;
+                        result.lastInsertId = insResult.lastInsertId;
+
                         result.shardList.push({shard, inserted: insResult.inserted});
                         shardRowCount = table.rowsInterface.getAllIdsSize();
                     } finally {
