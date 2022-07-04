@@ -377,6 +377,14 @@ class TableRowsFile {
     async saveDelta(deltaStep) {
         const delta = this.getDelta(deltaStep);
 
+        //bug fix: this code must be exactly here due to defragmetation delta changes
+        //lastSavedBlockIndex
+        let lastSavedBI = 0;
+        const len = delta.blockRows.length;
+        if (len) {
+            lastSavedBI = delta.blockRows[len - 1][0];
+        }
+
         //check all blocks fragmentation & defragment if needed
         if (!this.defragCandidates)
             this.defragCandidates = [];
@@ -487,9 +495,8 @@ class TableRowsFile {
             await this.fd.blockRows.write(buf.join(',') + ',');
 
         //lastSavedBlockIndex
-        const len = delta.blockRows.length;
-        if (len) {
-            this.lastSavedBlockIndex = delta.blockRows[len - 1][0];
+        if (lastSavedBI) {
+            this.lastSavedBlockIndex = lastSavedBI;
         }
 
         //blocks finalization
