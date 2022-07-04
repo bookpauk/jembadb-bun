@@ -121,7 +121,7 @@ class TableRowsFile {
         let queue = this.fileLockMap.get(fileName);
         
         if (!queue) {
-            queue = new LockQueue(100);
+            queue = new LockQueue(1000);
             this.fileLockMap.set(fileName, queue);
         }
 
