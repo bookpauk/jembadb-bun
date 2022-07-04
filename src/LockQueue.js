@@ -18,9 +18,7 @@ class LockQueue {
             }
 
             if (this.waitingQueue.length < this.queueSize) {
-                this.waitingQueue.push(() => {
-                    resolve();
-                });
+                this.waitingQueue.push({resolve, reject});
             } else {
                 reject(new Error('Lock queue is too long'));
             }
@@ -29,8 +27,7 @@ class LockQueue {
 
     ret() {
         if (this.waitingQueue.length) {
-            const onFreed = this.waitingQueue.shift();
-            onFreed();
+            this.waitingQueue.shift().resolve();
         } else {
             this.freed = true;
         }
@@ -41,12 +38,16 @@ class LockQueue {
         return this.get(false);
     }
 
-    free() {
+    retAll() {
         while (this.waitingQueue.length) {
-            const onFreed = this.waitingQueue.shift();
-            onFreed();
+            this.waitingQueue.shift().resolve();
         }
-        this.freed = true;
+    }
+
+    errAll(error = 'rejected') {
+        while (this.waitingQueue.length) {
+            this.waitingQueue.shift().reject(new Error(error));
+        }
     }
 
 }

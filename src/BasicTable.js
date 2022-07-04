@@ -321,7 +321,7 @@ class BasicTable {
 
         this.closing = true;
 
-        this.lock.queueSize++;//if 'lock queue is too long' error
+        this.lock.errAll('Table closing');
         await this.lock.get();
         try {
             this.opened = false;
