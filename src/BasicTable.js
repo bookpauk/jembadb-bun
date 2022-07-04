@@ -316,14 +316,17 @@ class BasicTable {
     }
 
     async close() {
-        if (this.closed)
+        if (this.closing || this.closed)
             return;
 
-        this.opened = false;
-        this.closed = true;
+        this.closing = true;
 
+        this.lock.queueSize++;//if 'lock queue is too long' error
         await this.lock.get();
         try {
+            this.opened = false;
+            this.closed = true;
+
             if (!this.inMemory) {
                 while (this.savingChanges) {
                     await utils.sleep(10);
