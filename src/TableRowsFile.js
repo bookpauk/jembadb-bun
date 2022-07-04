@@ -25,7 +25,7 @@ class TableRowsFile {
         this.lastSavedBlockIndex = 0;
         this.blockList = new Map();
         this.blockSetDefrag = new Set();
-        this.blocksNotFinalized = new Map();//indexes of blocks
+        this.blocksNotFinalized = new Set();//indexes of blocks
         this.loadedBlocks = [];
         this.newBlocks = [];
         this.deltas = new Map();
@@ -141,7 +141,7 @@ class TableRowsFile {
         };
         this.blockList.set(this.currentBlockIndex, block);
         this.newBlocks.push(this.currentBlockIndex);
-        this.blocksNotFinalized.set(this.currentBlockIndex, 1);
+        this.blocksNotFinalized.add(this.currentBlockIndex);
 
         return block;
     }
@@ -327,7 +327,7 @@ class TableRowsFile {
     async finalizeBlocks() {
 //console.log(this.blocksNotFinalized.size);
 
-        for (const index of this.blocksNotFinalized.keys()) {
+        for (const index of this.blocksNotFinalized) {
             if (this.destroyed)
                 return;
 
@@ -619,11 +619,11 @@ class TableRowsFile {
             this.loadedBlocks = [];
         }
 
-        this.blocksNotFinalized = new Map();
+        this.blocksNotFinalized = new Set();
         for (const block of this.blockList.values()) {
             this.blockSetDefrag.add(block.index);
             if (!block.final)
-                this.blocksNotFinalized.set(block.index, 1);
+                this.blocksNotFinalized.add(block.index);
         }
 
         return autoIncrement;
