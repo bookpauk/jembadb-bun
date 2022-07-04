@@ -586,6 +586,7 @@ class JembaDb {
             enabled: this.monitoringEnabled,
             table: this.monitoringTable,
             interval: this.monitoringInterval,
+            maxQueryLength: this.monitoringMaxQueryLength,
         };
 
         for (const table of tables) {
@@ -650,6 +651,7 @@ class JembaDb {
         enable: Boolean, default false
         table: 'tableName', default '__monitoring'
         interval: Number, minutes, default 15
+        maxQueryLength: Number, default 200
     }
     result = {}
     */
@@ -663,6 +665,16 @@ class JembaDb {
             throw new Error(`query.interval must be of type 'number'`);
 
         this.monitoringInterval = query.interval || 15;
+
+        if (!utils.hasProp(this, 'monitoringMaxQueryLength'))
+            this.monitoringMaxQueryLength = 200;
+
+        if (utils.hasProp(query, 'maxQueryLength')) {
+            if (typeof(query.maxQueryLength) != 'number')
+                throw new Error(`query.maxQueryLength must be of type 'number'`);
+
+            this.monitoringMaxQueryLength = query.maxQueryLength;
+        }
 
         if (!this.monitoringTable)
             this.monitoringTable = '__monitoring';
@@ -698,7 +710,7 @@ class JembaDb {
                     table: this.monitoringTable,
                     create: true,
                     type: 'memory',
-                    index: {field: 'timeEnd', type: 'number'}
+                    flag: {name: 'executed', check: `(r) => (r.timeEnd === 0)`}
                 });
 
                 //save original methods
@@ -724,7 +736,7 @@ class JembaDb {
                                 monRec = {
                                     id: this.monitoringId++,
                                     method,
-                                    query: methodQuery,
+                                    query: (this.monitoringMaxQueryLength ? JSON.stringify(methodQuery).substring(0, this.monitoringMaxQueryLength) : ''),
                                     error,
                                     timeBegin: Date.now(),
                                     timeEnd: 0,
@@ -780,9 +792,23 @@ class JembaDb {
                             delDate.setMinutes(delDate.getMinutes() - this.monitoringInterval);
 
                             try {
-                                await monTableInstance.delete({where: `@@index('timeEnd', 0, ${this.esc(delDate.getTime())})`});
+                                await monTableInstance.delete({
+                                    where: `
+                                        let toDel = new Set();
+                                        for (const id of @all()) {
+                                            const row = @row(id);
+                                            if (row.timeBegin >= ${this.esc(delDate.getTime())}) {
+                                                break;
+                                            } else {
+                                                if (row.timeEnd > 0 && row.timeEnd < ${this.esc(delDate.getTime())})
+                                                    toDel.add(id);
+                                            }
+                                        }
+                                        return toDel;
+                                    `
+                                });
                             } catch (e) {
-                                //silent
+                                //console.error(e);//silent
                             }
                         }
                     } finally {
