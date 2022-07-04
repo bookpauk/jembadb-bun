@@ -10,6 +10,8 @@ const maxBlockSize = 1024*1024;//bytes
 const minFileDumpSize = 100*1024;//bytes
 const maxFileDumpSize = 50*1024*1024;//bytes
 
+const unloadBlocksPeriod = 1000;//ms
+
 class TableRowsFile {
     constructor(tablePath, cacheSize, compressed) {
         this.tablePath = tablePath;
@@ -171,35 +173,50 @@ class TableRowsFile {
         return block.index;
     }
 
-    unloadBlocksIfNeeded() {
-        const nb = [];
-        for (const index of this.newBlocks) {
-            if (index < this.lastSavedBlockIndex) {
-                this.loadedBlocks.push(index);
-            } else {
-                nb.push(index);
-            }
+    unloadBlocksIfNeeded(fromTimer = false) {
+        if (!fromTimer) {
+            if (this.unloadTimer)
+                return;
+
+            this.unloadTimer = setTimeout(() => {this.unloadBlocksIfNeeded(true)}, unloadBlocksPeriod);
+            return;
         }
 
-        this.newBlocks = nb;
+        this.unloadTimer = null;
 
-        if (this.loadedBlocks.length <= this.loadedBlocksCount)
-            return;
-
-        //check loaded
-        while (this.loadedBlocks.length > this.loadedBlocksCount) {
-            const index = this.loadedBlocks.shift();
-
-            //additional check, just in case
-            if (index >= this.lastSavedBlockIndex)
-                continue;
-
-            const block = this.blockList.get(index);
-
-            if (block) {
-                block.rows = null;
-//console.log(`unloaded block ${block.index}`);
+        try {
+            const nb = [];
+            for (const index of this.newBlocks) {
+                if (index < this.lastSavedBlockIndex) {
+                    this.loadedBlocks.push(index);
+                } else {
+                    nb.push(index);
+                }
             }
+
+            this.newBlocks = nb;
+
+            if (this.loadedBlocks.length <= this.loadedBlocksCount)
+                return;
+
+            //check loaded
+            while (this.loadedBlocks.length > this.loadedBlocksCount) {
+                const index = this.loadedBlocks.shift();
+
+                //additional check, just in case
+                if (index >= this.lastSavedBlockIndex)
+                    continue;
+
+                const block = this.blockList.get(index);
+
+                if (block) {
+                    block.rows = null;
+//console.log(this.loadedBlocks.length, this.loadedBlocksCount);
+//console.log(`unloaded block ${block.index}`);
+                }
+            }
+        } catch (e) {
+            console.error(e);
         }
     }
 
@@ -675,6 +692,11 @@ class TableRowsFile {
 
     async destroy() {
         await this.closeAllFiles();
+
+        if (this.unloadTimer) {
+            clearTimeout(this.unloadTimer);
+            this.unloadTimer = null;
+        }
 
         this.destroyed = true;
     }
