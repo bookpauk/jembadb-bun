@@ -794,17 +794,13 @@ class JembaDb {
                             try {
                                 await monTableInstance.delete({
                                     where: `
-                                        let toDel = new Set();
-                                        for (const id of @all()) {
-                                            const row = @row(id);
+                                        @@iter(@all(), (row) => {
                                             if (row.timeBegin >= ${this.esc(delDate.getTime())}) {
-                                                break;
+                                                return;
                                             } else {
-                                                if (row.timeEnd > 0 && row.timeEnd < ${this.esc(delDate.getTime())})
-                                                    toDel.add(id);
+                                                return (row.timeEnd > 0 && row.timeEnd < ${this.esc(delDate.getTime())});
                                             }
-                                        }
-                                        return toDel;
+                                        });
                                     `
                                 });
                             } catch (e) {
