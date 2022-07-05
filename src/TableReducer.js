@@ -817,6 +817,24 @@ class TableReducer {
         }
     }
 
+    async dirtyHash(fieldName, value) {
+        if (this._hash.has(fieldName)) {
+            const hash = this._hash.get(fieldName);
+
+            if (!Array.isArray(value)) {
+                return hash.reduce(value);
+            } else {
+                const arrSet = [];
+                for (const v of value) {
+                    arrSet.push(hash.reduce(v));
+                }
+                return utils.unionSet(arrSet);
+            }
+        } else {
+            throw new Error(`Hash for field '${fieldName}' does not exist`);
+        }
+    }
+
     async hash(fieldName, value) {
         if (this._hash.has(fieldName)) {
             const hash = this._hash.get(fieldName);
@@ -872,6 +890,15 @@ class TableReducer {
             throw new Error(`Hash for field '${fieldName}' does not exist`);
         }
     }    
+
+    async dirtyIndexLR(fieldName, from, to) {
+        if (this._index.has(fieldName)) {
+            const index = this._index.get(fieldName);
+            return index.reduce(from, to);
+        } else {
+            throw new Error(`Index for field '${fieldName}' does not exist`);
+        }
+    }
 
     async _indexReduce(fieldName, from, to, checkFuncs) {
         if (this._index.has(fieldName)) {
