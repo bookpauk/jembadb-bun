@@ -248,9 +248,16 @@ class TableIndex {
             const a = this.sorted[s];
             if (!a.length) // на всякий случай
                 continue;
-            if (a[0] < min || min === null) {
-                min = a[0];
-                id = this.hash.get(min);
+
+            let first = 0;
+            while (first < a.length) {
+                if (this.hash.has(a[first]) && (a[first] < min || min === null)) {
+                    min = a[first];
+                    id = this.hash.get(min);
+                    break;
+                }
+
+                first++;
             }
         }
 
@@ -274,10 +281,15 @@ class TableIndex {
             if (!a.length) // на всякий случай
                 continue;
 
-            const last = a.length - 1;
-            if (a[last] > max || max === null) {
-                max = a[last];
-                id = this.hash.get(max);
+            let last = a.length;
+            while (last > 0) {
+                last--;
+
+                if (this.hash.has(a[last]) && (a[last] > max || max === null)) {
+                    max = a[last];
+                    id = this.hash.get(max);
+                    break;
+                }
             }
         }
 
