@@ -75,7 +75,7 @@ class TableIndex {
             d.push(value);
 
             let i = d.length - 1;
-            //вставка
+            //insert
             while (i > 0 && this.cmp(d[i], d[i - 1]) < 0) {
                 const v = d[i];
                 d[i] = d[i - 1];
@@ -84,7 +84,7 @@ class TableIndex {
             }
 
             if (d.length > 10) {
-                //слияние
+                //merging
                 while (s > 0 && this.sorted[s].length >= this.sorted[s - 1].length) {
                     const a = this.sorted.pop();
                     const b = this.sorted.pop();
@@ -178,7 +178,7 @@ class TableIndex {
         const result = [];
         for (let s = 0; s < this.sorted.length; s++) {
             const a = this.sorted[s];
-            if (!a.length) // на всякий случай
+            if (!a.length) // just in case
                 continue;
 
             let leftIndex = 0;
@@ -201,7 +201,7 @@ class TableIndex {
 
             let rightIndex = a.length;
             if (useTo) {
-                //дихотомия
+                //dichotomy
                 let left = 0;
                 let right = a.length - 1;
                 while (left < right) {
@@ -246,18 +246,15 @@ class TableIndex {
         let id = null;
         for (let s = 0; s < this.sorted.length; s++) {
             const a = this.sorted[s];
-            if (!a.length) // на всякий случай
+            if (!a.length) // just in case
                 continue;
 
-            let first = 0;
-            while (first < a.length) {
-                if (this.hash.has(a[first]) && (a[first] < min || min === null)) {
-                    min = a[first];
+            for (let i = 0; i < a.length; i++) {
+                if (this.hash.has(a[i]) && (a[i] < min || min === null)) {
+                    min = a[i];
                     id = this.hash.get(min);
                     break;
                 }
-
-                first++;
             }
         }
 
@@ -278,15 +275,12 @@ class TableIndex {
         let id = null;
         for (let s = 0; s < this.sorted.length; s++) {
             const a = this.sorted[s];
-            if (!a.length) // на всякий случай
+            if (!a.length) // just in case
                 continue;
 
-            let last = a.length;
-            while (last > 0) {
-                last--;
-
-                if (this.hash.has(a[last]) && (a[last] > max || max === null)) {
-                    max = a[last];
+            for (let i = a.length - 1; i >= 0; i--) {
+                if (this.hash.has(a[i]) && (a[i] > max || max === null)) {
+                    max = a[i];
                     id = this.hash.get(max);
                     break;
                 }
