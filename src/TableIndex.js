@@ -183,7 +183,7 @@ class TableIndex {
 
             let leftIndex = 0;
             if (useFrom) {
-                //дихотомия
+                //dichotomy
                 let left = 0;
                 let right = a.length - 1;
                 while (left < right) {
