@@ -121,7 +121,7 @@ class TableRowsFile {
         let queue = this.fileLockMap.get(fileName);
         
         if (!queue) {
-            queue = new LockQueue(100);
+            queue = new LockQueue(1000);
             this.fileLockMap.set(fileName, queue);
         }
 
@@ -164,7 +164,7 @@ class TableRowsFile {
         block.rows.set(id, row);
 
         block.addCount++;
-        block.size += rowStr.length;
+        block.size += JSON.stringify(id).length + rowStr.length;
         block.rowsLength = block.rows.size;
 
         delta.blockList.push([block.index, 1]);

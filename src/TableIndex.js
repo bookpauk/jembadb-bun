@@ -75,7 +75,7 @@ class TableIndex {
             d.push(value);
 
             let i = d.length - 1;
-            //вставка
+            //insert
             while (i > 0 && this.cmp(d[i], d[i - 1]) < 0) {
                 const v = d[i];
                 d[i] = d[i - 1];
@@ -84,7 +84,7 @@ class TableIndex {
             }
 
             if (d.length > 10) {
-                //слияние
+                //merging
                 while (s > 0 && this.sorted[s].length >= this.sorted[s - 1].length) {
                     const a = this.sorted.pop();
                     const b = this.sorted.pop();
@@ -178,12 +178,12 @@ class TableIndex {
         const result = [];
         for (let s = 0; s < this.sorted.length; s++) {
             const a = this.sorted[s];
-            if (!a.length) // на всякий случай
+            if (!a.length) // just in case
                 continue;
 
             let leftIndex = 0;
             if (useFrom) {
-                //дихотомия
+                //dichotomy
                 let left = 0;
                 let right = a.length - 1;
                 while (left < right) {
@@ -201,7 +201,7 @@ class TableIndex {
 
             let rightIndex = a.length;
             if (useTo) {
-                //дихотомия
+                //dichotomy
                 let left = 0;
                 let right = a.length - 1;
                 while (left < right) {
@@ -239,6 +239,25 @@ class TableIndex {
         return utils.unionSet(result);
     }
 
+    reduceHash(value) {
+        this.checkType(value);
+
+        value = this.prepareValue(value);
+        let result;
+        if (this.hash.has(value)) {
+            if (this.unique) {
+                result = new Set();
+                result.add(this.hash.get(value));
+            } else {
+                result = this.hash.get(value);
+            }
+        } else {
+            result = new Set();
+        }
+
+        return result;
+    }
+
     min() {
         let result = new Set();
 
@@ -246,11 +265,15 @@ class TableIndex {
         let id = null;
         for (let s = 0; s < this.sorted.length; s++) {
             const a = this.sorted[s];
-            if (!a.length) // на всякий случай
+            if (!a.length) // just in case
                 continue;
-            if (a[0] < min || min === null) {
-                min = a[0];
-                id = this.hash.get(min);
+
+            for (let i = 0; i < a.length; i++) {
+                if (this.hash.has(a[i]) && (a[i] < min || min === null)) {
+                    min = a[i];
+                    id = this.hash.get(min);
+                    break;
+                }
             }
         }
 
@@ -271,13 +294,15 @@ class TableIndex {
         let id = null;
         for (let s = 0; s < this.sorted.length; s++) {
             const a = this.sorted[s];
-            if (!a.length) // на всякий случай
+            if (!a.length) // just in case
                 continue;
 
-            const last = a.length - 1;
-            if (a[last] > max || max === null) {
-                max = a[last];
-                id = this.hash.get(max);
+            for (let i = a.length - 1; i >= 0; i--) {
+                if (this.hash.has(a[i]) && (a[i] > max || max === null)) {
+                    max = a[i];
+                    id = this.hash.get(max);
+                    break;
+                }
             }
         }
 
