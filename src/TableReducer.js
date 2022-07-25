@@ -1021,6 +1021,53 @@ class TableReducer {
         }
     }
 
+    async dirtyIndexHash(fieldName, value) {
+        if (this._index.has(fieldName)) {
+            const index = this._index.get(fieldName);
+
+            if (!Array.isArray(value)) {
+                return index.reduceHash(value);
+            } else {
+                const arrSet = [];
+                for (const v of value) {
+                    arrSet.push(index.reduceHash(v));
+                }
+                return utils.unionSet(arrSet);
+            }
+        } else {
+            throw new Error(`Index for field '${fieldName}' does not exist`);
+        }
+    }
+
+    async indexHash(fieldName, value) {
+        if (this._index.has(fieldName)) {
+            const index = this._index.get(fieldName);
+
+            const result = new Set();
+            if (!Array.isArray(value)) {
+                const ids = index.reduceHash(value);
+                for (const id of ids) {
+                    const row = await this._rowsInterface.getRow(id);
+                    if (row[fieldName] === value)
+                        result.add(id);
+                }
+            } else {
+                for (const v of value) {
+                    const ids = index.reduceHash(v);
+                    for (const id of ids) {
+                        const row = await this._rowsInterface.getRow(id);
+                        if (row[fieldName] === v)
+                            result.add(id);
+                    }
+                }
+            }
+
+            return result;
+        } else {
+            throw new Error(`Index for field '${fieldName}' does not exist`);
+        }
+    }
+
     //returns iterator, not Set
     async all() {
         return this._rowsInterface.getAllIds();

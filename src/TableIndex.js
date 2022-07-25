@@ -239,6 +239,25 @@ class TableIndex {
         return utils.unionSet(result);
     }
 
+    reduceHash(value) {
+        this.checkType(value);
+
+        value = this.prepareValue(value);
+        let result;
+        if (this.hash.has(value)) {
+            if (this.unique) {
+                result = new Set();
+                result.add(this.hash.get(value));
+            } else {
+                result = this.hash.get(value);
+            }
+        } else {
+            result = new Set();
+        }
+
+        return result;
+    }
+
     min() {
         let result = new Set();
 
