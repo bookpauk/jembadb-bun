@@ -128,7 +128,7 @@ class JembaDb {
 
     async _checkTable(table) {
         if (await this.tableExists({table})) {
-            throw new Error(`Table '${table}' has not been opened yet`);
+            throw new Error(`Table '${table}' closed`);
         } else {
             throw new Error(`Table '${table}' does not exist`);
         }
@@ -743,7 +743,11 @@ class JembaDb {
                                 };
 
                                 if (monTableInstance) {
-                                    await monTableInstance.insert({rows: [monRec]});
+                                    try {
+                                        await monTableInstance.insert({rows: [monRec]});
+                                    } catch (e) {
+                                        //quiet, origMethod must be called even if monitoring error occured
+                                    }
                                 }
                             }
 
