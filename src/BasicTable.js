@@ -63,7 +63,7 @@ class BasicTable {
         if (this.inMemory)
             throw new Error('_cloneTable error: inMemory source table');
 
-        await fs.rmdir(destTablePath, { recursive: true });
+        await fs.rm(destTablePath, { recursive: true, force: true });
         await fs.mkdir(destTablePath, { recursive: true });
 
         // '(r) => true' || 'nodata',
@@ -198,7 +198,7 @@ class BasicTable {
 
         await this._cloneTable(this.tablePath, tempTablePath);
 
-        await fs.rmdir(this.tablePath, { recursive: true });
+        await fs.rm(this.tablePath, { recursive: true, force: true });
         await fs.rename(tempTablePath, this.tablePath);
     }
 

@@ -81,7 +81,7 @@ class ShardedTable {
     }
 
     async _cloneTable(srcTablePath, destTablePath, cloneSelf = false, noMeta = false, filter) {
-        await fs.rmdir(destTablePath, { recursive: true });
+        await fs.rm(destTablePath, { recursive: true, force: true });
         await fs.mkdir(destTablePath, { recursive: true });
 
         let srcShardListTable = null;
@@ -159,7 +159,7 @@ class ShardedTable {
                     await destShardListTable.insert({rows: [{id: shardRec.id, num: shardRec.num, count}]});
                     totalCount += count;
                 } else {
-                    await fs.rmdir(toTablePath, { recursive: true });
+                    await fs.rm(toTablePath, { recursive: true, force: true });
                 }
             }
         }
@@ -176,7 +176,7 @@ class ShardedTable {
 
         await this._cloneTable(this.tablePath, tempTablePath);
 
-        await fs.rmdir(this.tablePath, { recursive: true });
+        await fs.rm(this.tablePath, { recursive: true, force: true });
         await fs.rename(tempTablePath, this.tablePath);
     }
 
@@ -365,7 +365,7 @@ class ShardedTable {
                 this.shardList.delete(shard);
                 this.openedShardLockList.delete(shard);
 
-                await fs.rmdir(this._shardTablePath(shardRec.num), { recursive: true });
+                await fs.rm(this._shardTablePath(shardRec.num), { recursive: true, force: true });
             } finally {
                 shdLock.ret();
                 duiLock.ret();
@@ -403,7 +403,7 @@ class ShardedTable {
             query.tablePath = this._shardTablePath(shardRec.num);
 
             if (isNew) {
-                await fs.rmdir(query.tablePath, { recursive: true });
+                await fs.rm(query.tablePath, { recursive: true, force: true });
 
                 await table.open(query);
 

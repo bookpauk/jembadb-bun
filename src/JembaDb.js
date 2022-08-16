@@ -259,7 +259,7 @@ class JembaDb {
                 }
 
                 const basePath = `${this.dbPath}/${query.table}`;
-                await fs.rmdir(basePath, { recursive: true });
+                await fs.rm(basePath, { recursive: true, force: true });
 
                 this.table.delete(query.table);
             } else {
@@ -316,7 +316,7 @@ class JembaDb {
                     this.table.set(table, newTableInstance);
                 } else {
                     const toTable = `${table}___temporary_truncating`;
-                    await fs.rmdir(`${this.dbPath}/${toTable}`, { recursive: true });
+                    await fs.rm(`${this.dbPath}/${toTable}`, { recursive: true, force: true });
 
                     await this._clone({table, toTable, filter: 'nodata'});
 
