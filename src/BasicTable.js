@@ -479,6 +479,7 @@ class BasicTable {
     /*
     query = {
         count: Boolean,
+        dirtyIdsOnly: Boolean,
         where: `@@index('field1', 10, 20)`,
         distinct: 'fieldName' || Array,
         group: {byField: 'fieldName' || Array, byExpr: '(r) => groupingValue', countField: 'fieldName'},
@@ -511,6 +512,8 @@ class BasicTable {
         if (query.distinct || query.group) {
             if (query.distinct && query.group)
                 throw new Error(`One of query.distinct or query.qroup params expected, but not both`);
+            if (query.dirtyIdsOnly)
+                throw new Error(`query.distinct or query.qroup params are forbidden if dirtyIdsOnly=true`);
 
             let groupByField = null;
             let groupByExpr = null;
@@ -555,7 +558,7 @@ class BasicTable {
 
         //selection
         let found = [];
-        if (query.count && !query.distinct && !query.group) {//optimization
+        if (query.count && !query.distinct && !query.group && !query.dirtyIdsOnly) {//optimization
             if (query.where) {
                 let count = 0;
                 for (const id of ids) {
@@ -567,11 +570,17 @@ class BasicTable {
                 found = [{count: this.rowsInterface.getAllIdsSize()}];
             }
         } else {//full running
-            for (const id of ids) {
-                const row = await this.rowsInterface.getRow(id);
+            if (query.dirtyIdsOnly) {
+                for (const id of ids) {
+                    found.push({id});
+                }
+            } else {
+                for (const id of ids) {
+                    const row = await this.rowsInterface.getRow(id);
 
-                if (row && !inGroup(row)) {
-                    found.push(row);
+                    if (row && !inGroup(row)) {
+                        found.push(row);
+                    }
                 }
             }
 
