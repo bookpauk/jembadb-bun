@@ -843,6 +843,7 @@ class JembaDb {
         shards: ['shard1', 'shard2', ...] || '(s) => (s == 'shard1')', //for sharded table only
         persistent: Boolean,//for sharded table only, do not unload shard while persistent == true
         count: Boolean,
+        dirtyIdsOnly: Boolean,
         where: `@@index('field1', 10, 20)`,
         distinct: 'fieldName' || Array,
         group: {byField: 'fieldName' || Array, byExpr: '(r) => groupingValue', countField: 'fieldName'},

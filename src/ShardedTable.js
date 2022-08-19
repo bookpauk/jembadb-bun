@@ -719,6 +719,7 @@ class ShardedTable {
         shards: ['shard1', 'shard2', ...] || '(s) => (s == 'shard1')',
         persistent: Boolean,//do not unload query.shards while persistent == true
         count: Boolean,
+        dirtyIdsOnly: Boolean,
         where: `@@index('field1', 10, 20)`,
         distinct: 'fieldName' || Array,
         group: {byField: 'fieldName' || Array, byExpr: '(r) => groupingValue', countField: 'fieldName'},
