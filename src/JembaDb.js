@@ -35,6 +35,7 @@ delete
 
 markCorrupted
 
+freeMemory
 esc
 */
 
@@ -1013,6 +1014,10 @@ class JembaDb {
         } else {
             await this._checkTable(query.table);
         }
+    }
+
+    async freeMemory() {
+        utils.freeMemory();
     }
 
     esc(obj) {
