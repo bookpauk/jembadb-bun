@@ -202,6 +202,12 @@ async function releaseFileLock(lockPath, fileWatcher) {
     await deleteFile(lockFile);
 }
 
+function freeMemory() {
+    if (global.gc) {
+        global.gc();
+    }
+}
+
 module.exports = {
     sleep,
     sleepWithStop,
@@ -217,4 +223,5 @@ module.exports = {
     deleteFile,
     getFileLock,
     releaseFileLock,
+    freeMemory,
 };

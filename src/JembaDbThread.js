@@ -29,6 +29,7 @@ delete
 
 markCorrupted
 
+freeMemory
 esc
 */
 
@@ -43,7 +44,7 @@ class JembaDbThread {
             'create', 'drop', 'truncate', 'clone', 'open', 'openAll', 'close', 'closeAll',
             'tableExists', 'getDbInfo', 'getDbSize', 'setMonitoring',
             'select', 'insert', 'update', 'delete',
-            'markCorrupted'
+            'markCorrupted', 'freeMemory',
         ];
 
         for (const action of apiMethods) {
