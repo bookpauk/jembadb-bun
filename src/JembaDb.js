@@ -482,6 +482,8 @@ class JembaDb {
 
     /*
     query = {
+        exclude: String || Array, do not open excluded tables
+        //table open params
         type: 'basic' | 'memory' | 'sharded', default 'basic'
         cacheSize: Number, 5
         cacheShards: Number, 1, for sharded table only
@@ -490,24 +492,30 @@ class JembaDb {
         recreate: Boolean, false,
         autoRepair: Boolean, false,
         forceFileClosing: Boolean, false,
+        typeCompatMode: Boolean, false,
     }
     */
     async openAll(query = {}) {
         this._checkOpened();
 
         const tables = await this._getTableList();
+        let excluded = new Set();
+
+        if (query.exclude) {
+            excluded = new Set(utils.paramToArray(query.exclude));
+
+            query = utils.cloneDeep(query);
+            delete query.exclude;
+        }
 
         //sequentially
         for (const table of tables) {
+            if (excluded.has(table))
+                continue;
+
             this._checkOpened();
             await this.open(Object.assign({}, query, {table}));
         }
-
-        /*const promises = [];
-        for (const table of tables) {
-            promises.push(this.open(Object.assign({}, query, {table})));
-        }
-        await Promise.all(promises);*/
     }
 
     /*
