@@ -1090,8 +1090,25 @@ class TableReducer {
         return result;
     }
 
+    async unsafeIter(ids, checkFunc) {
+        const result = new Set();
+        for (const id of ids) {
+            const row = await this._rowsInterface.getRow(id);
+            const checkResult = checkFunc(row);
+            if (checkResult === undefined)
+                break;
+            if (checkResult)
+                result.add(id);
+        }
+        return result;
+    }
+
     async row(id) {
         return utils.cloneDeep(await this._rowsInterface.getRow(id));
+    }
+
+    async unsafeRow(id) {
+        return await this._rowsInterface.getRow(id);
     }
 
     async setItem(name, item) {
