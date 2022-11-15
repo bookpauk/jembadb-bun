@@ -8,6 +8,7 @@ const TableHash = require('./TableHash');
 const TableFlag = require('./TableFlag');
 
 const utils = require('./utils');
+const fileUtils = require('./fileUtils');
 
 const maxFileDumpSize = 2*1024*1024;//bytes
 
@@ -430,7 +431,7 @@ class TableReducer {
                 const fileName0 = `${fileName}.0`;
                 const fileName2 = `${fileName}.2`;
                 
-                await this._writeFinal(fileName2, JSON.stringify([...flag.flag]));
+                await fileUtils.writeFinal(fileName2, [...flag.flag], this._compressed);
 
                 await fs.rename(fileName2, fileName0);
                 await this._closeFd(fileName1);
@@ -452,13 +453,13 @@ class TableReducer {
                 const fileName2 = `${fileName}.2`;
                 
                 if (hash.unique) {
-                    await this._writeFinal(fileName2, JSON.stringify(Array.from(hash.hash)));
+                    await fileUtils.writeFinal(fileName2, Array.from(hash.hash), this._compressed);
                 } else {
                     const buf = [];
                     for (const [key, keySet] of hash.hash) {
                         buf.push([key, [...keySet]]);
                     }
-                    await this._writeFinal(fileName2, JSON.stringify(buf));
+                    await fileUtils.writeFinal(fileName2, buf, this._compressed);
                 }
 
                 await fs.rename(fileName2, fileName0);
@@ -488,7 +489,7 @@ class TableReducer {
                         buf.hash.push([key, [...keySet]]);
                     }
                 }
-                await this._writeFinal(fileName2, JSON.stringify(buf));
+                await fileUtils.writeFinal(fileName2, buf, this._compressed);
 
                 await fs.rename(fileName2, fileName0);
                 await this._closeFd(fileName1);
@@ -502,11 +503,11 @@ class TableReducer {
         const fileName0 = `${fileName}.0`;
         const fileName2 = `${fileName}.2`;
 
-        await this._writeFinal(fileName2, JSON.stringify({
+        await fileUtils.writeFinal(fileName2, {
             flag: this._listFlag(),
             hash: this._listHash(),
             index: this._listIndex(),
-        }));
+        }, this._compressed);
         await fs.rename(fileName2, fileName0);
     }
     
@@ -596,59 +597,6 @@ class TableReducer {
         this._deltas.delete(deltaStep);
     }
 
-    async _loadFile(filePath) {
-        let buf = await fs.readFile(filePath);
-        if (!buf.length)
-            throw new Error(`TableReducer: file ${filePath} is empty`);
-
-        const flag = buf[0];
-        if (flag === 50) {//flag '2' ~ finalized && compressed
-            const packed = Buffer.from(buf.buffer, buf.byteOffset + 1, buf.length - 1);
-            const data = await utils.inflate(packed);
-            buf = data.toString();
-        } else if (flag === 49) {//flag '1' ~ finalized
-            buf[0] = 32;//' '
-            buf = buf.toString();
-        } else {//flag '0' ~ not finalized
-            buf[0] = 32;//' '
-            const last = buf.length - 1;
-            if (buf[last] === 44) {//','
-                buf[last] = 93;//']'
-                buf = buf.toString();
-            } else {//corrupted or empty
-                buf = buf.toString();
-                if (this._loadCorrupted) {
-                    const lastComma = buf.lastIndexOf(',');
-                    if (lastComma >= 0)
-                        buf = buf.substring(0, lastComma);
-                }
-                buf += ']';
-            }
-        }
-
-        let result;
-        try {
-            result = JSON.parse(buf);
-        } catch(e) {
-            throw new Error(`load ${filePath} failed: ${e.message}`);
-        }
-
-        return result;
-    }
-
-    async _writeFinal(fileName, data) {
-        if (!this._compressed) {
-            await fs.writeFile(fileName, '1' + data);
-        } else {
-            let buf = Buffer.from(data);
-            buf = await utils.deflate(buf, this.compressed);
-            const fd = await fs.open(fileName, 'w');
-            await fd.write('2');
-            await fd.write(buf);
-            await fd.close();
-        }
-    }
-
     async _load(corrupted = false, metaPath = '') {
         if (corrupted)
             this._loadCorrupted = true;
@@ -657,7 +605,7 @@ class TableReducer {
         if (!await utils.pathExists(metaFileName))
             return;
 
-        const meta = await this._loadFile(metaFileName);
+        const meta = await fileUtils.loadFile(metaFileName, this._loadCorrupted);
 
         //flag
         this._flag.clear();
@@ -672,13 +620,13 @@ class TableReducer {
 
                 //load dump
                 if (await utils.pathExists(fileName0)) {
-                    const data = await this._loadFile(fileName0);
+                    const data = await fileUtils.loadFile(fileName0, this._loadCorrupted);
                     flag.flag = new Set(data);
                 }
 
                 //load delta
                 if (await utils.pathExists(fileName1)) {
-                    const flagDelta = await this._loadFile(fileName1);
+                    const flagDelta = await fileUtils.loadFile(fileName1, this._loadCorrupted);
                     for (const deltaRec of flagDelta) {
                         const [id, isAdd] = deltaRec;
                         if (isAdd)
@@ -705,7 +653,7 @@ class TableReducer {
 
                 //load dump
                 if (await utils.pathExists(fileName0)) {
-                    const data = await this._loadFile(fileName0);
+                    const data = await fileUtils.loadFile(fileName0, this._loadCorrupted);
                     if (hash.unique) {
                         hash.hash = new Map(data);
                     } else {
@@ -718,7 +666,7 @@ class TableReducer {
 
                 //load delta
                 if (await utils.pathExists(fileName1)) {
-                    const hashDelta = await this._loadFile(fileName1);
+                    const hashDelta = await fileUtils.loadFile(fileName1, this._loadCorrupted);
                     for (const deltaRec of hashDelta) {
                         const [value, id, isAdd] = deltaRec;
                         if (isAdd)
@@ -745,7 +693,7 @@ class TableReducer {
 
                 //load dump
                 if (await utils.pathExists(fileName0)) {
-                    const data = await this._loadFile(fileName0);
+                    const data = await fileUtils.loadFile(fileName0, this._loadCorrupted);
                     index.sorted = data.sorted;
                     index.delCount = data.delCount;
 
@@ -761,7 +709,7 @@ class TableReducer {
 
                 //load delta
                 if (await utils.pathExists(fileName1)) {
-                    const indexDelta = await this._loadFile(fileName1);
+                    const indexDelta = await fileUtils.loadFile(fileName1, this._loadCorrupted);
                     for (const deltaRec of indexDelta) {
                         const [value, id, isAdd] = deltaRec;
                         if (isAdd)

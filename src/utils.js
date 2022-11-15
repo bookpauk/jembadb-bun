@@ -1,4 +1,5 @@
 'use strict';
+const v8 = require('node:v8');
 
 const fsCB = require('fs');
 const fs = fsCB.promises;
@@ -92,7 +93,7 @@ function paramToArray(param) {
 }
 
 function cloneDeep(obj) {
-    return JSON.parse(JSON.stringify(obj));
+    return v8.deserialize(v8.serialize(obj));
 }
 
 //async
