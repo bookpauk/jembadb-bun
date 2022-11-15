@@ -131,17 +131,29 @@ class TableRowsFile {
         return queue;
     }
 
+    metaBlock(block) {
+        const result = Object.assign(
+            {
+                index: null,
+                delCount: 0,
+                addCount: 0,
+                rows: null,//!!!
+                size: 0,
+                rowsLength: 0,
+                final: false,
+            },
+            block
+        );
+
+        result.rows = null;//!!!
+        return result;
+    }
+
+
     createNewBlock() {
         this.currentBlockIndex++;
-        const block = {
-            index: this.currentBlockIndex,
-            delCount: 0,
-            addCount: 0,
-            size: 0,
-            rows: new Map(),
-            rowsLength: 0,
-            final: false,
-        };
+        const block = this.metaBlock({index: this.currentBlockIndex});
+        block.rows = new Map();
         this.blockList.set(this.currentBlockIndex, block);
         this.newBlocks.push(this.currentBlockIndex);
         this.blocksNotFinalized.add(this.currentBlockIndex);
@@ -296,7 +308,7 @@ class TableRowsFile {
                 block.size = blockSize;
                 block.rowsLength = rows.size;//insurance
                 block.final = true;
-                await fileUtils.appendRecs(this.fd.blockList, [v8.serialize(block)]);
+                await fileUtils.appendRecs(this.fd.blockList, [v8.serialize(this.metaBlock(block))]);
 //console.log(`finalized block ${block.index}`);
             }
 
@@ -324,7 +336,9 @@ class TableRowsFile {
         if ((blocklist1Size > minFileDumpSize && blocklist1Size > this.blocklist0Size) || blocklist1Size > maxFileDumpSize) {
             const blocklist0Path = `${this.tablePath}/blocklist.0`;
             const blocklist2Path = `${this.tablePath}/blocklist.2`;
-            await fileUtils.writeFinal(blocklist2Path, Array.from(this.blockList.values()), this.compressed);
+
+            const metaBlocks = Array.from(this.blockList.values()).map(block => this.metaBlock(block));
+            await fileUtils.writeFinal(blocklist2Path, metaBlocks, this.compressed);
 
             await fs.rename(blocklist2Path, blocklist0Path);
             await this.closeFd('blockList');
@@ -418,7 +432,7 @@ class TableRowsFile {
                 if (lastSaved !== index) {//optimization
                     const block = this.blockList.get(index);
                     if (block)//might be defragmented already
-                        buf.push(v8.serialize(block));
+                        buf.push(v8.serialize(this.metaBlock(block)));
                     lastSaved = index;
                 }
             } else {
@@ -610,15 +624,7 @@ class TableRowsFile {
                 const numStr = path.basename(file.name, '.jem');
                 const index = parseInt(numStr, 10);
                 if (!isNaN(index)) {
-                    const block = {
-                        index,
-                        delCount: 0,
-                        addCount: 0,
-                        size: 0,
-                        rows: null,
-                        rowsLength: 0,
-                        final: false,
-                    };
+                    const block = this.metaBlock({index});
                     this.blockList.set(block.index, block);
                     //console.log(index);
                 }
