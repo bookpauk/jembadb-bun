@@ -2,6 +2,8 @@
 
 const fs = require('fs').promises;
 const path = require('path');
+const v8 = require('node:v8');
+
 const utils = require('./utils');
 const fileUtils = require('./fileUtils');
 const LockQueue = require('./LockQueue');
@@ -147,7 +149,7 @@ class TableRowsFile {
         return block;
     }
 
-    addToCurrentBlock(id, row, rowStr, deltaStep, delta) {
+    addToCurrentBlock(id, row, rowSer, deltaStep, delta) {
         if (!delta)
             delta = this.getDelta(deltaStep);
 
@@ -165,11 +167,11 @@ class TableRowsFile {
         block.rows.set(id, row);
 
         block.addCount++;
-        block.size += JSON.stringify(id).length + rowStr.length;
+        block.size += rowSer.length + 4;
         block.rowsLength = block.rows.size;
 
         delta.blockList.push([block.index, 1]);
-        delta.blockRows.push([block.index, id, row]);
+        delta.blockRows.push([block.index, rowSer]);
 
         return block.index;
     }
@@ -255,14 +257,7 @@ class TableRowsFile {
             throw new Error('TableRowsFile: fileName is empty');
         }
 
-        const exists = await utils.pathExists(fileName);
-
-        const fd = await fs.open(fileName, 'a');
-        if (!exists) {
-            await fd.write('0[');
-        }
-
-        this.fd[name] = fd;
+        this.fd[name] = await fileUtils.openFile(fileName);
     }
     
     blockRowsFilePath(index) {
@@ -291,7 +286,7 @@ class TableRowsFile {
                 const blockPath = this.blockRowsFilePath(block.index);
 //console.log(`start finalize block ${block.index}`);
                 const arr = await fileUtils.loadFile(blockPath, this.allowCorrupted);
-                const rows = new Map(arr);
+                const rows = new Map(arr);//!!! compressing appended key-values, the last one key-value pair is actual
 
                 const finBlockPath = `${blockPath}.tmp`;
                 const blockSize = await fileUtils.writeFinal(finBlockPath, Array.from(rows), this.compressed);
@@ -301,7 +296,7 @@ class TableRowsFile {
                 block.size = blockSize;
                 block.rowsLength = rows.size;//insurance
                 block.final = true;
-                await this.fd.blockList.write(JSON.stringify(block) + ',');
+                await fileUtils.appendRecs(this.fd.blockList, [v8.serialize(block)]);
 //console.log(`finalized block ${block.index}`);
             }
 
@@ -382,7 +377,7 @@ class TableRowsFile {
             //move all active rows from fragmented block to current
             for (const [id, row] of block.rows.entries()) {
                 if (this.blockIndex.get(id) === block.index) {
-                    const newIndex = this.addToCurrentBlock(id, row, JSON.stringify(row), deltaStep, delta);
+                    const newIndex = this.addToCurrentBlock(id, row, v8.serialize([row.id, row]), deltaStep, delta);
                     this.blockIndex.set(id, newIndex);
                     delta.blockIndex.push([id, newIndex]);
                 }
@@ -404,10 +399,10 @@ class TableRowsFile {
 
         let buf = [];
         for (const deltaRec of delta.blockIndex) {
-            buf.push(JSON.stringify(deltaRec));
+            buf.push(v8.serialize(deltaRec));
         }
         if (buf.length)
-            await this.fd.blockIndex.write(buf.join(',') + ',');
+            await fileUtils.appendRecs(this.fd.blockIndex, buf);
 
         //blockList delta save
         if (!this.fd.blockList)
@@ -423,24 +418,24 @@ class TableRowsFile {
                 if (lastSaved !== index) {//optimization
                     const block = this.blockList.get(index);
                     if (block)//might be defragmented already
-                        buf.push(JSON.stringify(block));
+                        buf.push(v8.serialize(block));
                     lastSaved = index;
                 }
             } else {
-                buf.push(JSON.stringify({index, deleted: 1}));
+                buf.push(v8.serialize({index, deleted: 1}));
             }
         }
         if (buf.length)
-            await this.fd.blockList.write(buf.join(',') + ',');
+            await fileUtils.appendRecs(this.fd.blockList, buf);
 
         //blockRows delta save
         buf = [];
         for (const deltaRec of delta.blockRows) {
-            const [index, id, row] = deltaRec;
+            const [index, rowSer] = deltaRec;
 
             if (this.fd.blockRowsIndex !== index) {
                 if (buf.length)
-                    await this.fd.blockRows.write(buf.join(',') + ',');
+                    await fileUtils.appendRecs(this.fd.blockRows, buf);
                 buf = [];
                 await this.closeFd('blockRows');
                 this.fd.blockRowsIndex = null;
@@ -453,10 +448,10 @@ class TableRowsFile {
                 this.fd.blockRowsIndex = index;
             }
 
-            buf.push(JSON.stringify([id, row]));
+            buf.push(rowSer);
         }
         if (buf.length)
-            await this.fd.blockRows.write(buf.join(',') + ',');
+            await fileUtils.appendRecs(this.fd.blockRows, buf);
 
         //lastSavedBlockIndex
         if (lastSavedBI) {

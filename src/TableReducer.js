@@ -2,6 +2,7 @@
 
 const fs = require('fs').promises;
 const path = require('path');
+const v8 = require('node:v8');
 
 const TableIndex = require('./TableIndex');
 const TableHash = require('./TableHash');
@@ -407,14 +408,7 @@ class TableReducer {
             throw new Error('TableReducer: openFd name is empty');
         }
 
-        const exists = await utils.pathExists(name);
-
-        const fd = await fs.open(name, 'a');
-        if (!exists) {
-            await fd.write('0[');
-        }
-
-        this._fd[name] = fd;
+        this._fd[name] = await fileUtils.openFile(name);
     }
 
     async _dumpMaps(delta) {
@@ -527,11 +521,11 @@ class TableReducer {
 
             const buf = [];
             for (const deltaRec of flagDelta) {
-                buf.push(JSON.stringify(deltaRec));
+                buf.push(v8.serialize(deltaRec));
             }
 
             if (buf.length)
-                await this._fd[fileName].write(buf.join(',') + ',');
+                await fileUtils.appendRecs(this._fd[fileName], buf);
         }
 
         //save hash delta
@@ -546,11 +540,11 @@ class TableReducer {
 
             const buf = [];
             for (const deltaRec of hashDelta) {
-                buf.push(JSON.stringify(deltaRec));
+                buf.push(v8.serialize(deltaRec));
             }
 
             if (buf.length)
-                await this._fd[fileName].write(buf.join(',') + ',');
+                await fileUtils.appendRecs(this._fd[fileName], buf);
         }
 
         //save index delta
@@ -565,11 +559,11 @@ class TableReducer {
 
             const buf = [];
             for (const deltaRec of indexDelta) {
-                buf.push(JSON.stringify(deltaRec));
+                buf.push(v8.serialize(deltaRec));
             }
 
             if (buf.length)
-                await this._fd[fileName].write(buf.join(',') + ',');
+                await fileUtils.appendRecs(this._fd[fileName], buf);
         }
 
         //dumps
