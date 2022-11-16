@@ -69,7 +69,7 @@ async function writeFinal(fileName, data, compressed) {
     await fd.write(buf);
     await fd.close();
 
-    return buf.byteLength + 1;
+    return buf.length + 1;
 }
 
 async function appendRecs(fd, recs) {

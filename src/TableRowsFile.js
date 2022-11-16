@@ -179,7 +179,7 @@ class TableRowsFile {
         block.rows.set(id, row);
 
         block.addCount++;
-        block.size += rowSer.length + 4;
+        block.size += rowSer.length + 1;
         block.rowsLength = block.rows.size;
 
         delta.blockList.push([block.index, 1]);
