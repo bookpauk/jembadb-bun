@@ -2,9 +2,9 @@
 
 const fs = require('fs').promises;
 const path = require('path');
-const v8 = require('node:v8');
 
 const utils = require('./utils');
+const mson = require('./mson');
 const fileUtils = require('./fileUtils');
 const LockQueue = require('./LockQueue');
 
@@ -308,7 +308,7 @@ class TableRowsFile {
                 block.size = blockSize;
                 block.rowsLength = rows.size;//insurance
                 block.final = true;
-                await fileUtils.appendRecs(this.fd.blockList, [v8.serialize(this.metaBlock(block))]);
+                await fileUtils.appendRecs(this.fd.blockList, [mson.encode(this.metaBlock(block))]);
 //console.log(`finalized block ${block.index}`);
             }
 
@@ -391,7 +391,7 @@ class TableRowsFile {
             //move all active rows from fragmented block to current
             for (const [id, row] of block.rows.entries()) {
                 if (this.blockIndex.get(id) === block.index) {
-                    const newIndex = this.addToCurrentBlock(id, row, v8.serialize([row.id, row]), deltaStep, delta);
+                    const newIndex = this.addToCurrentBlock(id, row, mson.encode([row.id, row]), deltaStep, delta);
                     this.blockIndex.set(id, newIndex);
                     delta.blockIndex.push([id, newIndex]);
                 }
@@ -413,7 +413,7 @@ class TableRowsFile {
 
         let buf = [];
         for (const deltaRec of delta.blockIndex) {
-            buf.push(v8.serialize(deltaRec));
+            buf.push(mson.encode(deltaRec));
         }
         if (buf.length)
             await fileUtils.appendRecs(this.fd.blockIndex, buf);
@@ -432,11 +432,11 @@ class TableRowsFile {
                 if (lastSaved !== index) {//optimization
                     const block = this.blockList.get(index);
                     if (block)//might be defragmented already
-                        buf.push(v8.serialize(this.metaBlock(block)));
+                        buf.push(mson.encode(this.metaBlock(block)));
                     lastSaved = index;
                 }
             } else {
-                buf.push(v8.serialize({index, deleted: 1}));
+                buf.push(mson.encode({index, deleted: 1}));
             }
         }
         if (buf.length)

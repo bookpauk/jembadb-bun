@@ -11,6 +11,7 @@
 */
 const fs = require('fs').promises;
 const utils = require('./utils');
+const mson = require('./mson');
 const LockQueue = require('./LockQueue');
 
 const BasicTable = require('./BasicTable');
@@ -879,11 +880,11 @@ class ShardedTable {
                     if (shardGen)
                         row.shard = shardGen(row);
                     else
-                        throw new Error(`No row.shard field found for row: ${JSON.stringify(row)}`);
+                        throw new Error(`No row.shard field found for row: ${mson.encode(row)}`);
                 }
 
                 if (row.shard === '' || typeof(row.shard) !== 'string') 
-                    throw new Error(`Wrong row.shard field value: '${row.shard}' for row: ${JSON.stringify(row)}`);
+                    throw new Error(`Wrong row.shard field value: '${row.shard}' for row: ${mson.encode(row)}`);
 
                 //auto sharding
                 if (row.shard === autoShardName)

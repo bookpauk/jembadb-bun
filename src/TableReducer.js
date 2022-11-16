@@ -2,13 +2,13 @@
 
 const fs = require('fs').promises;
 const path = require('path');
-const v8 = require('node:v8');
 
 const TableIndex = require('./TableIndex');
 const TableHash = require('./TableHash');
 const TableFlag = require('./TableFlag');
 
 const utils = require('./utils');
+const mson = require('./mson');
 const fileUtils = require('./fileUtils');
 
 const maxFileDumpSize = 2*1024*1024;//bytes
@@ -521,7 +521,7 @@ class TableReducer {
 
             const buf = [];
             for (const deltaRec of flagDelta) {
-                buf.push(v8.serialize(deltaRec));
+                buf.push(mson.encode(deltaRec));
             }
 
             if (buf.length)
@@ -540,7 +540,7 @@ class TableReducer {
 
             const buf = [];
             for (const deltaRec of hashDelta) {
-                buf.push(v8.serialize(deltaRec));
+                buf.push(mson.encode(deltaRec));
             }
 
             if (buf.length)
@@ -559,7 +559,7 @@ class TableReducer {
 
             const buf = [];
             for (const deltaRec of indexDelta) {
-                buf.push(v8.serialize(deltaRec));
+                buf.push(mson.encode(deltaRec));
             }
 
             if (buf.length)

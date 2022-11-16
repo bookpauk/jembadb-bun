@@ -4,8 +4,8 @@
     - maximum rec count is ~16000000 (limitation of JS Map)
 */
 const fs = require('fs').promises;
-const v8 = require('node:v8');
 const utils = require('./utils');
+const mson = require('./mson');
 
 const TableReducer = require('./TableReducer');
 const TableRowsMem = require('./TableRowsMem');
@@ -124,7 +124,7 @@ class BasicTable {
 
                 let ser;
                 try {
-                    ser = v8.serialize([row.id, row]);//because of serialization errors
+                    ser = mson.encode([row.id, row]);//because of serialization errors
                 } catch(e) {
                     continue;
                 }
@@ -541,7 +541,7 @@ class BasicTable {
                 let groupingValue = '';
                 if (groupByField) {
                     for (const field of groupByField) {
-                        const value = JSON.stringify(row[field]);
+                        const value = mson.encode(row[field]);
                         groupingValue += value.length + value;
                     }
                 } else if (groupByExpr) {
@@ -687,7 +687,7 @@ class BasicTable {
 
                 newRows.push(newRow);
                 oldRows.push((oldRow ? oldRow : {}));
-                newRowsSer.push(v8.serialize([newRow.id, newRow]));//because of serialization errors
+                newRowsSer.push(mson.encode([newRow.id, newRow]));//because of serialization errors
             }
 
             const result = {inserted: 0, replaced: 0, lastInsertId: -1};
@@ -797,7 +797,7 @@ class BasicTable {
                 if (t === 'number' && newRow.id >= this.autoIncrement)
                     this.autoIncrement = newRow.id + 1;
 
-                newRowsSer.push(v8.serialize([newRow.id, newRow]));//because of serialization errors
+                newRowsSer.push(mson.encode([newRow.id, newRow]));//because of serialization errors
             }
 
             this.deltaStep++;
