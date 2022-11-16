@@ -36,7 +36,7 @@ function reviver(key, value) {
 
 function encode(obj) {
     const str = JSON.stringify(obj);
-    if (str.indexOf('{}') >= 0 || str.indexOf(':{"0":') >= 0)
+    if (str.indexOf('{}') >= 0 || str.indexOf('{"0":') >= 0)
         return JSON.stringify(obj, replacer);
     else
         return str;
