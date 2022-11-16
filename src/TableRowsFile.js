@@ -2,7 +2,10 @@
 
 const fs = require('fs').promises;
 const path = require('path');
+
 const utils = require('./utils');
+const mson = require('./mson');
+const fileUtils = require('./fileUtils');
 const LockQueue = require('./LockQueue');
 
 const maxBlockSize = 1024*1024;//bytes
@@ -128,17 +131,29 @@ class TableRowsFile {
         return queue;
     }
 
+    metaBlock(block) {
+        const result = Object.assign(
+            {
+                index: null,
+                delCount: 0,
+                addCount: 0,
+                rows: null,//!!!
+                size: 0,
+                rowsLength: 0,
+                final: false,
+            },
+            block
+        );
+
+        result.rows = null;//!!!
+        return result;
+    }
+
+
     createNewBlock() {
         this.currentBlockIndex++;
-        const block = {
-            index: this.currentBlockIndex,
-            delCount: 0,
-            addCount: 0,
-            size: 0,
-            rows: new Map(),
-            rowsLength: 0,
-            final: false,
-        };
+        const block = this.metaBlock({index: this.currentBlockIndex});
+        block.rows = new Map();
         this.blockList.set(this.currentBlockIndex, block);
         this.newBlocks.push(this.currentBlockIndex);
         this.blocksNotFinalized.add(this.currentBlockIndex);
@@ -146,7 +161,7 @@ class TableRowsFile {
         return block;
     }
 
-    addToCurrentBlock(id, row, rowStr, deltaStep, delta) {
+    addToCurrentBlock(id, row, rowSer, deltaStep, delta) {
         if (!delta)
             delta = this.getDelta(deltaStep);
 
@@ -164,11 +179,11 @@ class TableRowsFile {
         block.rows.set(id, row);
 
         block.addCount++;
-        block.size += JSON.stringify(id).length + rowStr.length;
+        block.size += rowSer.length + 1;
         block.rowsLength = block.rows.size;
 
         delta.blockList.push([block.index, 1]);
-        delta.blockRows.push([block.index, id, row]);
+        delta.blockRows.push([block.index, rowSer]);
 
         return block.index;
     }
@@ -220,59 +235,6 @@ class TableRowsFile {
         }
     }
 
-    async loadFile(filePath) {
-        let buf = await fs.readFile(filePath);
-        if (!buf.length)
-            throw new Error(`TableRowsFile: file ${filePath} is empty`);
-
-        const flag = buf[0];
-        if (flag === 50) {//flag '2' ~ finalized && compressed
-            const packed = Buffer.from(buf.buffer, buf.byteOffset + 1, buf.length - 1);
-            const data = await utils.inflate(packed);
-            buf = data.toString();
-        } else if (flag === 49) {//flag '1' ~ finalized
-            buf[0] = 32;//' '
-            buf = buf.toString();
-        } else {//flag '0' ~ not finalized
-            buf[0] = 32;//' '
-            const last = buf.length - 1;
-            if (buf[last] === 44) {//','
-                buf[last] = 93;//']'
-                buf = buf.toString();
-            } else {//corrupted or empty
-                buf = buf.toString();
-                if (this.allowCorrupted) {
-                    const lastComma = buf.lastIndexOf(',');
-                    if (lastComma >= 0)
-                        buf = buf.substring(0, lastComma);
-                }
-                buf += ']';
-            }
-        }
-
-        let result;
-        try {
-            result = JSON.parse(buf);
-        } catch(e) {
-            throw new Error(`load ${filePath} failed: ${e.message}`);
-        }
-
-        return result;
-    }
-
-    async writeFinal(fileName, data) {
-        if (!this.compressed) {
-            await fs.writeFile(fileName, '1' + data);
-        } else {
-            let buf = Buffer.from(data);
-            buf = await utils.deflate(buf, this.compressed);
-            const fd = await fs.open(fileName, 'w');
-            await fd.write('2');
-            await fd.write(buf);
-            await fd.close();
-        }
-    }
-
     async loadBlock(block) {
 //console.log(`start load block ${block.index}`);
         const fileName = this.blockRowsFilePath(block.index);
@@ -280,7 +242,7 @@ class TableRowsFile {
         await fLock.get();
         try {
             if (!block.rows) {
-                const arr = await this.loadFile(fileName);
+                const arr = await fileUtils.loadFile(fileName, this.allowCorrupted);
 
                 block.rows = new Map(arr);
 
@@ -307,14 +269,7 @@ class TableRowsFile {
             throw new Error('TableRowsFile: fileName is empty');
         }
 
-        const exists = await utils.pathExists(fileName);
-
-        const fd = await fs.open(fileName, 'a');
-        if (!exists) {
-            await fd.write('0[');
-        }
-
-        this.fd[name] = fd;
+        this.fd[name] = await fileUtils.openFile(fileName);
     }
     
     blockRowsFilePath(index) {
@@ -342,19 +297,18 @@ class TableRowsFile {
 
                 const blockPath = this.blockRowsFilePath(block.index);
 //console.log(`start finalize block ${block.index}`);
-                const arr = await this.loadFile(blockPath);
-                const rows = new Map(arr);
+                const arr = await fileUtils.loadFile(blockPath, this.allowCorrupted);
+                const rows = new Map(arr);//!!! compressing appended key-values, the last one key-value pair is actual
 
                 const finBlockPath = `${blockPath}.tmp`;
-                const rowsStr = JSON.stringify(Array.from(rows));
-                await this.writeFinal(finBlockPath, rowsStr);
+                const blockSize = await fileUtils.writeFinal(finBlockPath, Array.from(rows), this.compressed);
 
                 await fs.rename(finBlockPath, blockPath);
 
-                block.size = Buffer.byteLength(rowsStr, 'utf8') + 1;
+                block.size = blockSize;
                 block.rowsLength = rows.size;//insurance
                 block.final = true;
-                await this.fd.blockList.write(JSON.stringify(block) + ',');
+                await fileUtils.appendRecs(this.fd.blockList, [mson.encode(this.metaBlock(block))]);
 //console.log(`finalized block ${block.index}`);
             }
 
@@ -369,7 +323,7 @@ class TableRowsFile {
         if ((blockindex1Size > minFileDumpSize && blockindex1Size > this.blockindex0Size) || blockindex1Size > maxFileDumpSize) {
             const blockindex0Path = `${this.tablePath}/blockindex.0`;
             const blockindex2Path = `${this.tablePath}/blockindex.2`;
-            await this.writeFinal(blockindex2Path, JSON.stringify(Array.from(this.blockIndex)));
+            await fileUtils.writeFinal(blockindex2Path, Array.from(this.blockIndex), this.compressed);
 
             await fs.rename(blockindex2Path, blockindex0Path);
             await this.closeFd('blockIndex');
@@ -382,7 +336,9 @@ class TableRowsFile {
         if ((blocklist1Size > minFileDumpSize && blocklist1Size > this.blocklist0Size) || blocklist1Size > maxFileDumpSize) {
             const blocklist0Path = `${this.tablePath}/blocklist.0`;
             const blocklist2Path = `${this.tablePath}/blocklist.2`;
-            await this.writeFinal(blocklist2Path, JSON.stringify(Array.from(this.blockList.values())));
+
+            const metaBlocks = Array.from(this.blockList.values()).map(block => this.metaBlock(block));
+            await fileUtils.writeFinal(blocklist2Path, metaBlocks, this.compressed);
 
             await fs.rename(blocklist2Path, blocklist0Path);
             await this.closeFd('blockList');
@@ -435,7 +391,7 @@ class TableRowsFile {
             //move all active rows from fragmented block to current
             for (const [id, row] of block.rows.entries()) {
                 if (this.blockIndex.get(id) === block.index) {
-                    const newIndex = this.addToCurrentBlock(id, row, JSON.stringify(row), deltaStep, delta);
+                    const newIndex = this.addToCurrentBlock(id, row, mson.encode([row.id, row]), deltaStep, delta);
                     this.blockIndex.set(id, newIndex);
                     delta.blockIndex.push([id, newIndex]);
                 }
@@ -457,10 +413,10 @@ class TableRowsFile {
 
         let buf = [];
         for (const deltaRec of delta.blockIndex) {
-            buf.push(JSON.stringify(deltaRec));
+            buf.push(mson.encode(deltaRec));
         }
         if (buf.length)
-            await this.fd.blockIndex.write(buf.join(',') + ',');
+            await fileUtils.appendRecs(this.fd.blockIndex, buf);
 
         //blockList delta save
         if (!this.fd.blockList)
@@ -476,24 +432,24 @@ class TableRowsFile {
                 if (lastSaved !== index) {//optimization
                     const block = this.blockList.get(index);
                     if (block)//might be defragmented already
-                        buf.push(JSON.stringify(block));
+                        buf.push(mson.encode(this.metaBlock(block)));
                     lastSaved = index;
                 }
             } else {
-                buf.push(JSON.stringify({index, deleted: 1}));
+                buf.push(mson.encode({index, deleted: 1}));
             }
         }
         if (buf.length)
-            await this.fd.blockList.write(buf.join(',') + ',');
+            await fileUtils.appendRecs(this.fd.blockList, buf);
 
         //blockRows delta save
         buf = [];
         for (const deltaRec of delta.blockRows) {
-            const [index, id, row] = deltaRec;
+            const [index, rowSer] = deltaRec;
 
             if (this.fd.blockRowsIndex !== index) {
                 if (buf.length)
-                    await this.fd.blockRows.write(buf.join(',') + ',');
+                    await fileUtils.appendRecs(this.fd.blockRows, buf);
                 buf = [];
                 await this.closeFd('blockRows');
                 this.fd.blockRowsIndex = null;
@@ -506,10 +462,10 @@ class TableRowsFile {
                 this.fd.blockRowsIndex = index;
             }
 
-            buf.push(JSON.stringify([id, row]));
+            buf.push(rowSer);
         }
         if (buf.length)
-            await this.fd.blockRows.write(buf.join(',') + ',');
+            await fileUtils.appendRecs(this.fd.blockRows, buf);
 
         //lastSavedBlockIndex
         if (lastSavedBI) {
@@ -589,7 +545,7 @@ class TableRowsFile {
             const dataPath = `${this.tablePath}/blockindex.${i}`;
 
             if (await utils.pathExists(dataPath)) {
-                const data = await this.loadFile(dataPath);
+                const data = await fileUtils.loadFile(dataPath, this.allowCorrupted);
                 loadBlockIndex(i, data);
             }
         }
@@ -603,7 +559,7 @@ class TableRowsFile {
             const dataPath = `${this.tablePath}/blocklist.${i}`;
 
             if (await utils.pathExists(dataPath)) {
-                const data = await this.loadFile(dataPath);
+                const data = await fileUtils.loadFile(dataPath, this.allowCorrupted);
                 loadBlockList(data);
             }
         }
@@ -652,7 +608,7 @@ class TableRowsFile {
 
             if (await utils.pathExists(dataPath)) {
                 try {
-                    const data = await this.loadFile(dataPath);
+                    const data = await fileUtils.loadFile(dataPath, this.allowCorrupted);
                     loadBlockIndex(i, data);
                 } catch(e) {
                     console.error(e);
@@ -668,15 +624,7 @@ class TableRowsFile {
                 const numStr = path.basename(file.name, '.jem');
                 const index = parseInt(numStr, 10);
                 if (!isNaN(index)) {
-                    const block = {
-                        index,
-                        delCount: 0,
-                        addCount: 0,
-                        size: 0,
-                        rows: null,
-                        rowsLength: 0,
-                        final: false,
-                    };
+                    const block = this.metaBlock({index});
                     this.blockList.set(block.index, block);
                     //console.log(index);
                 }

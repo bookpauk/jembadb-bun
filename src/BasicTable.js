@@ -5,6 +5,7 @@
 */
 const fs = require('fs').promises;
 const utils = require('./utils');
+const mson = require('./mson');
 
 const TableReducer = require('./TableReducer');
 const TableRowsMem = require('./TableRowsMem');
@@ -103,7 +104,7 @@ class BasicTable {
         const putRows = async(rows) => {
             const oldRows = [];
             const newRows = [];
-            const newRowsStr = [];
+            const newRowsSer = [];
             //checks
             for (const row of rows) {                
                 if (!row) {
@@ -121,16 +122,16 @@ class BasicTable {
                     continue;
                 }
 
-                let str = '';
+                let ser;
                 try {
-                    str = JSON.stringify(row);//because of stringify errors
+                    ser = mson.encode([row.id, row]);//because of serialization errors
                 } catch(e) {
                     continue;
                 }
 
                 newRows.push(row);
                 oldRows.push({});
-                newRowsStr.push(str);
+                newRowsSer.push(ser);
             }
 
             try {
@@ -140,9 +141,9 @@ class BasicTable {
                 //insert
                 for (let i = 0; i < newRows.length; i++) {
                     const newRow = newRows[i];
-                    const newRowStr = newRowsStr[i];
+                    const newRowSer = newRowsSer[i];
 
-                    tableRowsFileDest.setRow(newRow.id, newRow, newRowStr, 1);
+                    tableRowsFileDest.setRow(newRow.id, newRow, newRowSer, 1);
                 }
 
                 await tableRowsFileDest.saveDelta(1);
@@ -540,7 +541,7 @@ class BasicTable {
                 let groupingValue = '';
                 if (groupByField) {
                     for (const field of groupByField) {
-                        const value = JSON.stringify(row[field]);
+                        const value = mson.encode(row[field]);
                         groupingValue += value.length + value;
                     }
                 } else if (groupByExpr) {
@@ -661,7 +662,7 @@ class BasicTable {
 
             const newRows = [];
             const oldRows = [];
-            const newRowsStr = [];
+            const newRowsSer = [];
             //checks
             for (const newRow of newRowsSrc) {
                 if (newRow.id === undefined) {
@@ -686,7 +687,7 @@ class BasicTable {
 
                 newRows.push(newRow);
                 oldRows.push((oldRow ? oldRow : {}));
-                newRowsStr.push(JSON.stringify(newRow));//because of stringify errors
+                newRowsSer.push(mson.encode([newRow.id, newRow]));//because of serialization errors
             }
 
             const result = {inserted: 0, replaced: 0, lastInsertId: -1};
@@ -698,10 +699,10 @@ class BasicTable {
                 //insert
                 for (let i = 0; i < newRows.length; i++) {
                     const newRow = newRows[i];
-                    const newRowStr = newRowsStr[i];
+                    const newRowSer = newRowsSer[i];
                     const oldRow = oldRows[i];
 
-                    this.rowsInterface.setRow(newRow.id, newRow, newRowStr, this.deltaStep);
+                    this.rowsInterface.setRow(newRow.id, newRow, newRowSer, this.deltaStep);
 
                     result.lastInsertId = newRow.id;
 
@@ -783,7 +784,7 @@ class BasicTable {
 
             //mod & checks
             const context = {};
-            const newRowsStr = [];
+            const newRowsSer = [];
             for (const newRow of newRows) {
                 modFunc(newRow, context);
 
@@ -796,7 +797,7 @@ class BasicTable {
                 if (t === 'number' && newRow.id >= this.autoIncrement)
                     this.autoIncrement = newRow.id + 1;
 
-                newRowsStr.push(JSON.stringify(newRow));//because of stringify errors
+                newRowsSer.push(mson.encode([newRow.id, newRow]));//because of serialization errors
             }
 
             this.deltaStep++;
@@ -808,10 +809,10 @@ class BasicTable {
                 //replace
                 for (let i = 0; i < newRows.length; i++) {
                     const newRow = newRows[i];
-                    const newRowStr = newRowsStr[i];
+                    const newRowSer = newRowsSer[i];
 
                     // oldRow.id === newRow.id always here, so
-                    this.rowsInterface.setRow(newRow.id, newRow, newRowStr, this.deltaStep);
+                    this.rowsInterface.setRow(newRow.id, newRow, newRowSer, this.deltaStep);
 
                     result.updated++;
                 }

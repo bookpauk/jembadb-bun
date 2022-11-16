@@ -1,5 +1,6 @@
 'use strict';
 
+const mson = require('./mson');
 const fsCB = require('fs');
 const fs = fsCB.promises;
 const zlib = require('zlib');
@@ -84,7 +85,7 @@ async function pathExists(path) {
 }
 
 function esc(obj) {
-    return JSON.stringify(obj).replace(/@/g, '\\x40');
+    return mson.encode(obj).replace(/@/g, '\\x40');
 }
 
 function paramToArray(param) {
@@ -92,7 +93,7 @@ function paramToArray(param) {
 }
 
 function cloneDeep(obj) {
-    return JSON.parse(JSON.stringify(obj));
+    return mson.decode(mson.encode(obj));
 }
 
 //async

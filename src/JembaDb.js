@@ -8,6 +8,7 @@ const BasicTable = require('./BasicTable');
 
 const LockQueue = require('./LockQueue');
 const utils = require('./utils');
+const mson = require('./mson');
 
 /* API methods:
 lock
@@ -745,7 +746,7 @@ class JembaDb {
                                 monRec = {
                                     id: this.monitoringId++,
                                     method,
-                                    query: (this.monitoringMaxQueryLength ? JSON.stringify(methodQuery).substring(0, this.monitoringMaxQueryLength) : ''),
+                                    query: (this.monitoringMaxQueryLength ? mson.encode(methodQuery).substring(0, this.monitoringMaxQueryLength) : ''),
                                     error,
                                     timeBegin: Date.now(),
                                     timeEnd: 0,
