@@ -1,5 +1,4 @@
 const arrayClasses = {
-    ArrayBuffer,
     Int8Array,
     Uint8Array,
     Uint8ClampedArray,
@@ -18,7 +17,7 @@ function replacer(key, value) {
     if (ArrayBuffer.isView(value) && arrayClasses[value.constructor.name]) {
         return {
             __constructor: value.constructor.name,
-            __data: Buffer.from(value).toString('base64'),
+            __data: Buffer.from(value.buffer, value.byteOffset, value.byteLength).toString('base64'),
         };
     }
 
@@ -28,7 +27,8 @@ function replacer(key, value) {
 function reviver(key, value) {
     if (value.__constructor && arrayClasses[value.__constructor]) {
         const buf = Buffer.from(value.__data, 'base64');
-        return new arrayClasses[value.__constructor](buf);
+        const ArrayClass = arrayClasses[value.__constructor];
+        return new ArrayClass(buf.buffer, buf.byteOffset, buf.byteLength/ArrayClass.BYTES_PER_ELEMENT);
     }
 
     return value;
