@@ -503,7 +503,7 @@ class BasicTable {
             ids = await whereFunc(this.reducer);
 
             if (query.rawResult)
-                return [{rawResult: utils.cloneDeep(ids)}];
+                return [{rawResult: ids}];
         } else {
             if (query.rawResult)
                 throw new Error(`query.where param expected if query.rawResult set to true`);
