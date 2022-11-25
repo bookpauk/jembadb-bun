@@ -136,6 +136,10 @@ async function getFileLock(lockPath, softLock, ignoreLock) {
     const softLockCheckName = '__softlockcheck';
     const softLockCheckFile = `${lockPath}/${softLockCheckName}`;
 
+    if (!await pathExists(lockPath)) {
+        throw new Error(`Path does not exist: ${lockPath}`);
+    }
+
     //check locks
     //  hard lock
     if (!ignoreLock && await pathExists(lockFile)) {
@@ -176,15 +180,33 @@ async function getFileLock(lockPath, softLock, ignoreLock) {
     } else {//soft lock
         await fs.writeFile(softLockFile, '');
 
-        fileWatcher = fsCB.watch(lockPath, async(eventType, filename) => {
-            if (filename == softLockCheckName) {
-                try {
-                    await deleteFile(softLockCheckFile);
-                } catch (e) {
-                    console.error(e);
+        try {
+            const watcher = fsCB.watch(lockPath, async(eventType, filename) => {
+                if (filename == softLockCheckName) {
+                    try {
+                        await deleteFile(softLockCheckFile);
+                    } catch (e) {
+                        console.error(e);
+                    }
                 }
-            }
-        });
+            });
+            fileWatcher = {type: 'watcher', watcher};
+        } catch (e) {//if watch not implemented
+            fileWatcher = {type: 'timer', watching: true};
+            (async() => {
+                while (fileWatcher.watching) {
+                    try {
+                        await deleteFile(softLockCheckFile);
+                    } catch (e) {
+                        console.error(e);
+                    }
+
+                    await sleepWithStop(450, (stop) => {
+                        fileWatcher.stop = stop;
+                    });
+                }
+            })();
+        }
     }
 
     return fileWatcher;
@@ -195,8 +217,16 @@ async function releaseFileLock(lockPath, fileWatcher) {
     const softLockFile = `${lockPath}/__softlock`;
     const softLockCheckFile = `${lockPath}/__softlockcheck`;
 
-    if (fileWatcher)
-        fileWatcher.close();
+    if (fileWatcher) {
+        if (fileWatcher.type == 'watcher') {
+            fileWatcher.watcher.close();
+        } else if (fileWatcher.type == 'timer') {
+
+            fileWatcher.watching = false;
+            if (fileWatcher.stop)
+                fileWatcher.stop();
+        }
+    }
 
     await deleteFile(softLockCheckFile);
     await deleteFile(softLockFile);
