@@ -863,17 +863,17 @@ class TableReducer {
     async index(fieldName, from, to) {
         let checkFuncs = [
             (value) => (value > from && value < to),
-            (value) => (value.localeCompare(from) > 0 && value.localeCompare(to) < 0),
+            (value) => (value.localeCompare(from, 'en') > 0 && value.localeCompare(to, 'en') < 0),
         ];
         if (from === undefined) {
             checkFuncs = [
                 (value) => (value < to),
-                (value) => (value.localeCompare(to) < 0),
+                (value) => (value.localeCompare(to, 'en') < 0),
             ];
         } else if (to === undefined) {
             checkFuncs = [
                 (value) => (value > from),
-                (value) => (value.localeCompare(from) > 0),
+                (value) => (value.localeCompare(from, 'en') > 0),
             ];
         }
         return this._indexReduce(fieldName, from, to, checkFuncs);
@@ -882,17 +882,17 @@ class TableReducer {
     async indexL(fieldName, from, to) {
         let checkFuncs = [
             (value) => (value >= from && value < to),
-            (value) => (value.localeCompare(from) >= 0 && value.localeCompare(to) < 0),
+            (value) => (value.localeCompare(from, 'en') >= 0 && value.localeCompare(to, 'en') < 0),
         ];
         if (from === undefined) {
             checkFuncs = [
                 (value) => (value < to),
-                (value) => (value.localeCompare(to) < 0),
+                (value) => (value.localeCompare(to, 'en') < 0),
             ];
         } else if (to === undefined) {
             checkFuncs = [
                 (value) => (value >= from),
-                (value) => (value.localeCompare(from) >= 0),
+                (value) => (value.localeCompare(from, 'en') >= 0),
             ];
         }
         return this._indexReduce(fieldName, from, to, checkFuncs);
@@ -901,17 +901,17 @@ class TableReducer {
     async indexR(fieldName, from, to) {
         let checkFuncs = [
             (value) => (value > from && value <= to),
-            (value) => (value.localeCompare(from) > 0 && value.localeCompare(to) <= 0),
+            (value) => (value.localeCompare(from, 'en') > 0 && value.localeCompare(to, 'en') <= 0),
         ];
         if (from === undefined) {
             checkFuncs = [
                 (value) => (value <= to),
-                (value) => (value.localeCompare(to) <= 0),
+                (value) => (value.localeCompare(to, 'en') <= 0),
             ];
         } else if (to === undefined) {
             checkFuncs = [
                 (value) => (value > from),
-                (value) => (value.localeCompare(from) > 0),
+                (value) => (value.localeCompare(from, 'en') > 0),
             ];
         }
         return this._indexReduce(fieldName, from, to, checkFuncs);
@@ -920,17 +920,17 @@ class TableReducer {
     async indexLR(fieldName, from, to) {
         let checkFuncs = [
             (value) => (value >= from && value <= to),
-            (value) => (value.localeCompare(from) >= 0 && value.localeCompare(to) <= 0),
+            (value) => (value.localeCompare(from, 'en') >= 0 && value.localeCompare(to, 'en') <= 0),
         ];
         if (from === undefined) {
             checkFuncs = [
                 (value) => (value <= to),
-                (value) => (value.localeCompare(to) <= 0),
+                (value) => (value.localeCompare(to, 'en') <= 0),
             ];
         } else if (to === undefined) {
             checkFuncs = [
                 (value) => (value >= from),
-                (value) => (value.localeCompare(from) >= 0),
+                (value) => (value.localeCompare(from, 'en') >= 0),
             ];
         }
         return this._indexReduce(fieldName, from, to, checkFuncs);

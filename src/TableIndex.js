@@ -18,7 +18,7 @@ class TableIndex {
         this.numberAsString = (type === 'number_as_string');
         this.valueAsString = !this.isNumber || this.numberAsString;
 
-        this.cmp = (a, b) => a.localeCompare(b);
+        this.cmp = (a, b) => a.localeCompare(b, 'en');
         if (type === 'number') {
             this.cmp = (a, b) => a - b;
         } else if (type === 'number_as_string') {
