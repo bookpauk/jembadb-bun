@@ -547,8 +547,11 @@ class ShardedTable {
         this.closed = true;
 
         await this._closeShards(true);
-        await this.metaTable.close();
-        await this.shardListTable.close();
+        if (this.metaTable)
+            await this.metaTable.close();
+
+        if (this.shardListTable)
+            await this.shardListTable.close();
 
         while (this.checkingTables) {
             await utils.sleep(10);
