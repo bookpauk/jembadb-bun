@@ -20,7 +20,8 @@
     "LM_WARN": false,
     "LM_ERR": false,
     "LM_FATAL": false,
-    "LM_TOTAL": false
+    "LM_TOTAL": false,
+    "Bun": false
   },
   "rules": {
     "strict": 0,
