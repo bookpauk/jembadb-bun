@@ -2,7 +2,7 @@
 
 const { Worker } = require('worker_threads');
 const utils = require('./utils');
-const JembaDbChild = require('./JembaDbChild');
+
 /* API methods:
 lock
 unlock
@@ -63,8 +63,7 @@ class JembaDbThread {
     }
 
     _runWoker() {
-        //const worker = new Worker(`${__dirname}/JembaDbChild.js`);
-        const worker = new Worker(JembaDbChild, {eval: true});
+        const worker = new Worker(`${__dirname}/JembaDbChild.js`);
 
         worker.on('message', (mes) => {
             const listener = this.listeners.get(mes.requestId);
