@@ -179,6 +179,7 @@ async function getFileLock(lockPath, softLock, ignoreLock) {
         await fs.writeFile(lockFile, '');
     } else {//soft lock
         await fs.writeFile(softLockFile, '');
+        await sleep(0);//Bun problems, softLockFile file not created without pause
 
         try {
             const watcher = fsCB.watch(lockPath, async(eventType, filename) => {
