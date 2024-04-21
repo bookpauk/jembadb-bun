@@ -1,6 +1,6 @@
 {
-  "name": "jembadb",
-  "version": "5.1.7",
+  "name": "jembadb-bun",
+  "version": "6.0.0",
   "description": "Json Embeddable Appendable Database",
   "main": "./src/index.js",
   "scripts": {
@@ -8,22 +8,19 @@
   },
   "repository": {
     "type": "git",
-    "url": "git://github.com/bookpauk/jembadb.git"
+    "url": "git://github.com/bookpauk/jembadb-bun.git"
   },
   "keywords": [
     "JavaScript",
     "Json",
     "Database"
   ],
-  "engines": {
-    "node": ">=16.16.0"
-  },
   "author": "Book Pauk <bookpauk@gmail.com>",
   "license": "CC0-1.0",
   "bugs": {
-    "url": "https://github.com/bookpauk/jembadb/issues"
+    "url": "https://github.com/bookpauk/jembadb-bun/issues"
   },
-  "homepage": "https://github.com/bookpauk/jembadb#readme",
+  "homepage": "https://github.com/bookpauk/jembadb-bun#readme",
   "devDependencies": {
     "@babel/eslint-parser": "^7.19.1",
     "@babel/eslint-plugin": "^7.19.1",
